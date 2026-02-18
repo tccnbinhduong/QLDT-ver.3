@@ -4,7 +4,7 @@ import { useApp } from '../store/AppContext';
 import { checkConflict, calculateSubjectProgress, getSessionFromPeriod, parseLocal, determineStatus, getSessionSequenceInfo, generateId, base64ToArrayBuffer, getEffectiveTotalPeriods, isSubjectFinished, getCampusId } from '../utils';
 import { ScheduleItem, ScheduleStatus, Teacher } from '../types';
 import { format, addDays, isSameDay, getWeek } from 'date-fns';
-import { vi } from 'date-fns/locale/vi';
+import { vi } from 'date-fns/locale';
 import { Calendar as CalendarIcon, Plus, ChevronRight, ChevronLeft, AlertCircle, Save, Trash2, ListFilter, X, Copy, Clipboard, Users, Download, BookOpen, Mail, CalendarOff, Sun, Moon } from 'lucide-react';
 import ExcelJS from 'exceljs';
 import PizZip from 'pizzip';
@@ -167,7 +167,9 @@ const ScheduleManager: React.FC = () => {
 
           return {
               columns: cols,
-              rows: [1, 2, 3, 4], // Relative rows
+              // Fixed: Use 5 rows to accommodate Sunday 5-period blocks (1-5, 6-10)
+              // Weekdays Evening (11-15) will just show empty cells for period 15 if not used.
+              rows: [1, 2, 3, 4, 5], 
               type: 'matrix' // Use matrix rendering
           };
       }
@@ -878,8 +880,8 @@ const ScheduleManager: React.FC = () => {
 
                 if (item.periodCount > 1) {
                     const endRowIdx = rowIndex + item.periodCount - 1;
-                    // Check bounds
-                    if (endRowIdx < 3 + gridConfig.rows.length) {
+                    // Check bounds (Safe check)
+                    if (endRowIdx <= 2 + gridConfig.rows.length) {
                          worksheet.mergeCells(rowIndex, excelColIdx, endRowIdx, excelColIdx);
                     }
                 }
@@ -1072,7 +1074,7 @@ const ScheduleManager: React.FC = () => {
                    // Matrix (Evening): 1-4 relative
                    if (index === 0) {
                        isStartOfSession = true;
-                       sessionRowSpan = 4;
+                       sessionRowSpan = 5; // Updated to 5 to match new rows config
                        sessionLabel = 'Tối'; // Label for the row block
                    }
                }

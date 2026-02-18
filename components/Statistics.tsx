@@ -3,7 +3,7 @@ import React, { useMemo, useState } from 'react';
 import { useApp } from '../store/AppContext';
 import { ScheduleStatus, ScheduleItem } from '../types';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
-import *as XLSX from 'xlsx';
+import XLSX from 'xlsx';
 import { Download, AlertCircle, X } from 'lucide-react';
 import { format } from 'date-fns';
 import { parseLocal, isSubjectFinished, getEffectiveTotalPeriods } from '../utils';
@@ -70,31 +70,59 @@ const Statistics: React.FC = () => {
             (s.type === 'class' || (s.type === 'exam' && s.note?.toLowerCase().includes('thực hành')))
         ); 
 
-        // Metric 1: Active Load (For Chart)
-        // Sum of periods for subjects that are NOT YET FINISHED.
-        const activeLoad = allSchedules.reduce((acc, s) => {
+        // Helper: Calculate unique periods to handle Shared Subjects (Classes taught at the same time count as 1)
+        const calculateUniquePeriods = (items: ScheduleItem[]) => {
+            const uniqueSlots = new Set<string>();
+            let total = 0;
+            items.forEach(item => {
+                // Key based on Date and Start Period. 
+                // If a teacher teaches multiple classes at the same time (shared subject), 
+                // they will have the same date and start period.
+                const slotKey = `${item.date}-${item.startPeriod}`;
+                if (!uniqueSlots.has(slotKey)) {
+                    uniqueSlots.add(slotKey);
+                    total += item.periodCount;
+                }
+            });
+            return total;
+        };
+
+        // Filter for Active (Not finished)
+        const activeItems = allSchedules.filter(s => {
             const sub = subjects.find(sub => sub.id === s.subjectId);
             const cls = classes.find(c => c.id === s.classId);
             // If subject exists and is NOT finished, count it towards active load
-            if (sub && !isSubjectFinished(sub, cls, schedules)) {
-                return acc + s.periodCount;
-            }
-            return acc;
-        }, 0);
+            return sub && !isSubjectFinished(sub, cls, schedules);
+        });
 
-        // Metric 2: Taught Load (For Excel / History)
-        // Sum of periods that are explicitly marked as COMPLETED (actually taught).
-        const taughtLoad = allSchedules.reduce((acc, s) => {
-            if (s.status === ScheduleStatus.COMPLETED) {
-                return acc + s.periodCount;
-            }
-            return acc;
-        }, 0);
+        // Filter for Completed (Taught)
+        const completedItems = allSchedules.filter(s => s.status === ScheduleStatus.COMPLETED);
+
+        // Calculate Metrics using unique slot logic
+        const activeLoad = calculateUniquePeriods(activeItems);
+        const taughtLoad = calculateUniquePeriods(completedItems);
+
+        // Extra Info for Export
+        // 1. List of classes taught
+        const uniqueClassIds = Array.from(new Set(allSchedules.map(s => s.classId)));
+        const classNames = uniqueClassIds.map(id => classes.find(c => c.id === id)?.name).filter(Boolean).join(', ');
+
+        // 2. Start and End Dates
+        let startDate = '';
+        let endDate = '';
+        if (allSchedules.length > 0) {
+            const sortedDates = allSchedules.map(s => new Date(s.date).getTime()).sort((a, b) => a - b);
+            startDate = format(new Date(sortedDates[0]), 'dd/MM/yyyy');
+            endDate = format(new Date(sortedDates[sortedDates.length - 1]), 'dd/MM/yyyy');
+        }
 
         return {
           name: t.name,
           activePeriods: activeLoad,
-          taughtPeriods: taughtLoad
+          taughtPeriods: taughtLoad,
+          classList: classNames,
+          startDate,
+          endDate
         };
       });
   }, [teachers, schedules, subjects, classes]);
@@ -104,12 +132,13 @@ const Statistics: React.FC = () => {
 
   // 3. Subject Progress (All active subjects across all classes)
   const subjectStats = useMemo(() => {
-    const results: any[] = [];
+    const rawStats: any[] = [];
     
+    // Step 1: Collect raw stats for every class-subject combination
     classes.forEach(cls => {
         const isH8 = cls.name.toUpperCase().includes('H8');
         
-        // Subjects for this class: Major specific OR Common OR Culture (if not H8) OR Culture 8 (if H8)
+        // Subjects for this class
         const classSubjects = subjects.filter(s => {
             if (s.majorId === 'common') return true;
             if (s.majorId === 'culture') return !isH8;
@@ -125,28 +154,65 @@ const Statistics: React.FC = () => {
             );
             
             const learned = relevantSchedules.reduce((acc, curr) => acc + curr.periodCount, 0);
-            
-            // Effective periods calculation
             const effectiveTotal = getEffectiveTotalPeriods(sub, cls);
             const remaining = Math.max(0, effectiveTotal - learned);
             
-            // Filter: Only show subjects that are "currently learning"
-            // Condition: Learned > 0 (started) AND Remaining > 0 (not finished)
+            // Only show subjects that are "currently learning"
             if (learned > 0 && remaining > 0) {
-                 results.push({
+                 rawStats.push({
+                     id: sub.id,
                      name: sub.name,
                      className: cls.name,
-                     // Combine for unique label
-                     fullName: `${sub.name} (${cls.name})`,
                      total: effectiveTotal,
                      learned: learned,
-                     remaining: remaining
+                     remaining: remaining,
+                     isShared: sub.isShared
                  });
             }
         });
     });
+
+    // Step 2: Aggregate shared subjects
+    const aggregatedResults: any[] = [];
+    const sharedMap = new Map<string, any>(); // Key: subjectId-learnedCount
+
+    rawStats.forEach(item => {
+        if (item.isShared) {
+            // Group by Subject ID AND Progress (Learned count) to ensure distinct batches are separated
+            const key = `${item.id}-${item.learned}`;
+            
+            if (sharedMap.has(key)) {
+                // Already exists, just append class name
+                const existing = sharedMap.get(key);
+                existing.classNames.push(item.className);
+            } else {
+                // New shared entry
+                const newItem = {
+                    ...item,
+                    classNames: [item.className]
+                };
+                sharedMap.set(key, newItem);
+                aggregatedResults.push(newItem);
+            }
+        } else {
+            // Not shared, add directly
+            aggregatedResults.push({
+                ...item,
+                classNames: [item.className]
+            });
+        }
+    });
+
+    // Step 3: Format final output
+    return aggregatedResults.map(item => ({
+        name: item.name,
+        // Format: "Subject Name (Class A, Class B)"
+        fullName: `${item.name} (${item.classNames.join(', ')})`,
+        total: item.total,
+        learned: item.learned,
+        remaining: item.remaining
+    }));
     
-    return results;
   }, [subjects, schedules, classes]);
 
   const exportTeacherReport = () => {
@@ -155,12 +221,22 @@ const Statistics: React.FC = () => {
          'Họ và tên': t.name,
          'Số tiết đang dạy (Môn chưa kết thúc)': t.activePeriods,
          'Số tiết đã dạy (Thực tế đã hoàn thành)': t.taughtPeriods,
+         'Các lớp giảng dạy': t.classList,
+         'Ngày bắt đầu': t.startDate,
+         'Ngày kết thúc': t.endDate
      }));
     
     const ws = XLSX.utils.json_to_sheet(data);
     
     // Set column widths
-    ws['!cols'] = [{ wch: 25 }, { wch: 35 }, { wch: 35 }];
+    ws['!cols'] = [
+        { wch: 25 }, // Name
+        { wch: 35 }, // Active
+        { wch: 35 }, // Taught
+        { wch: 40 }, // Classes
+        { wch: 15 }, // Start Date
+        { wch: 15 }  // End Date
+    ];
 
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, "ThongKeGiaoVien");
@@ -209,7 +285,8 @@ const Statistics: React.FC = () => {
            </div>
            <p className="text-xs text-gray-500 mb-2 italic">
                * Biểu đồ chỉ hiển thị tải công việc hiện tại (các môn chưa kết thúc). <br/>
-               * Nhấn "Xuất Thống Kê Tổng" để xem cả số tiết đã dạy (lịch sử) của toàn bộ giáo viên.
+               * Môn học ghép (nhiều lớp học cùng lúc) chỉ được tính là 1 lần giảng dạy.<br/>
+               * Nhấn "Xuất Thống Kê Tổng" để xem chi tiết lịch sử, ngày dạy và danh sách lớp.
            </p>
            {chartData.length > 0 ? (
              <div className="flex-1 min-h-0">
@@ -241,7 +318,7 @@ const Statistics: React.FC = () => {
                         <BarChart data={subjectStats} layout="vertical" margin={{ top: 5, right: 30, left: 10, bottom: 5 }}>
                             <CartesianGrid strokeDasharray="3 3" horizontal={false} />
                             <XAxis type="number" />
-                            <YAxis dataKey="fullName" type="category" width={180} tick={{fontSize: 11}} />
+                            <YAxis dataKey="fullName" type="category" width={220} tick={{fontSize: 11}} />
                             <Tooltip cursor={{fill: '#f3f4f6'}} />
                             <Legend verticalAlign="top" height={36} />
                             <Bar dataKey="learned" stackId="a" fill="#10B981" name="Đã học" barSize={24} />

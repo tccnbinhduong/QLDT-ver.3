@@ -1,8 +1,9 @@
+
 import React, { useState, useRef, useMemo } from 'react';
 import { useApp } from '../store/AppContext';
 import { Student } from '../types';
 import { Plus, Trash2, Edit2, Upload, Save, X, Filter, User, HelpCircle, FileSpreadsheet, ArrowUpDown, ArrowUp, ArrowDown, Search } from 'lucide-react';
-import *as XLSX from 'xlsx';
+import XLSX from 'xlsx';
 import ExcelJS from 'exceljs';
 import saveAs from 'file-saver';
 import { format } from 'date-fns';
@@ -126,19 +127,19 @@ const StudentManager: React.FC = () => {
     const reader = new FileReader();
     reader.onload = (evt) => {
         try {
-            const bstr = evt.target?.result;
-            const wb = XLSX.read(bstr, { type: 'binary' });
+            const data = new Uint8Array(evt.target?.result as ArrayBuffer);
+            const wb = XLSX.read(data, { type: 'array' });
             const wsname = wb.SheetNames[0];
             const ws = wb.Sheets[wsname];
-            const data = XLSX.utils.sheet_to_json(ws, { header: 1 });
+            const json = XLSX.utils.sheet_to_json(ws, { header: 1 });
             
-            if (!data || data.length < 2) {
+            if (!json || json.length < 2) {
                 setTimeout(() => alert("File Excel rỗng hoặc không đúng định dạng!"), 100);
                 return;
             }
 
             // Remove header row
-            const rows = data.slice(1) as any[]; 
+            const rows = json.slice(1) as any[]; 
             
             // Map data to Student structure (Col 0: Code, Col 1: Name, Col 2: DOB, Col 3: POB, Col 4: Father, Col 5: Mother, Col 6: Phone)
             const newStudents: Omit<Student, 'id'>[] = rows.map(row => ({
@@ -164,7 +165,7 @@ const StudentManager: React.FC = () => {
             setTimeout(() => alert("Lỗi khi đọc file Excel. Vui lòng kiểm tra lại định dạng file."), 100);
         }
     };
-    reader.readAsBinaryString(file);
+    reader.readAsArrayBuffer(file);
   };
 
   const handleExportClassList = async () => {

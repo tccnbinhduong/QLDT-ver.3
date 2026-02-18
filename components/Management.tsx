@@ -3,7 +3,7 @@ import React, { useState, useRef, useMemo } from 'react';
 import { useApp } from '../store/AppContext';
 import { Teacher, Subject, ClassEntity } from '../types';
 import { Plus, Trash2, Edit2, Save, X, Filter, Search, Phone, Upload, HelpCircle, Users, ArrowUpDown, ArrowUp, ArrowDown } from 'lucide-react';
-import *as XLSX from 'xlsx';
+import XLSX from 'xlsx';
 
 const Management: React.FC = () => {
   const { 
@@ -134,19 +134,19 @@ const Management: React.FC = () => {
       const reader = new FileReader();
       reader.onload = (evt) => {
           try {
-              const bstr = evt.target?.result;
-              const wb = XLSX.read(bstr, { type: 'binary' });
+              const data = new Uint8Array(evt.target?.result as ArrayBuffer);
+              const wb = XLSX.read(data, { type: 'array' });
               const wsname = wb.SheetNames[0];
               const ws = wb.Sheets[wsname];
-              const data = XLSX.utils.sheet_to_json(ws, { header: 1 });
+              const json = XLSX.utils.sheet_to_json(ws, { header: 1 });
               
-              if (!data || data.length < 2) {
+              if (!json || json.length < 2) {
                   setTimeout(() => alert("File Excel rỗng hoặc không đúng định dạng!"), 100);
                   return;
               }
 
               // Remove header
-              const rows = data.slice(1) as any[];
+              const rows = json.slice(1) as any[];
               
               // Map columns: 0: Title, 1: Name, 2: Phone, 3: Bank, 4: Account, 5: Rate, 6: MainSubject
               const newTeachers: Omit<Teacher, 'id'>[] = rows.map(row => ({
@@ -170,7 +170,7 @@ const Management: React.FC = () => {
               setTimeout(() => alert("Lỗi khi đọc file Excel."), 100);
           }
       };
-      reader.readAsBinaryString(file);
+      reader.readAsArrayBuffer(file);
   };
 
   const handleSaveSubject = () => {
@@ -221,29 +221,34 @@ const Management: React.FC = () => {
       const reader = new FileReader();
       reader.onload = (evt) => {
           try {
-              const bstr = evt.target?.result;
-              const wb = XLSX.read(bstr, { type: 'binary' });
+              const data = new Uint8Array(evt.target?.result as ArrayBuffer);
+              const wb = XLSX.read(data, { type: 'array' });
               const wsname = wb.SheetNames[0];
               const ws = wb.Sheets[wsname];
-              const data = XLSX.utils.sheet_to_json(ws, { header: 1 });
+              const json = XLSX.utils.sheet_to_json(ws, { header: 1 });
 
-              if (!data || data.length < 2) {
+              if (!json || json.length < 2) {
                   setTimeout(() => alert("File Excel rỗng hoặc không đúng định dạng!"), 100);
                   return;
               }
 
-              const rows = data.slice(1) as any[];
+              const rows = json.slice(1) as any[];
               
-              // Map columns: 0: Name, 1: Major Name, 2: Periods (Day), 3: Periods (Evening)
+              // Map columns: 0: Name, 1: Major Name, 2: Periods (Day), 3: Periods (Evening), 4: IsShared (x)
               const newSubjects: Omit<Subject, 'id'>[] = rows.map(row => {
                   const majorName = row[1] ? String(row[1]).trim() : '';
                   const major = majors.find(m => m.name.toLowerCase() === majorName.toLowerCase());
                   
+                  // Parsing column 4 for Shared Flag
+                  const sharedInput = row[4] ? String(row[4]).toLowerCase().trim() : '';
+                  const isShared = sharedInput === 'x';
+
                   return {
                       name: row[0] || '',
                       majorId: major ? major.id : '', // If not found, leave empty or assign to default?
                       totalPeriods: row[2] ? Number(row[2]) : 30,
                       totalPeriodsEvening: row[3] ? Number(row[3]) : 0, // Read evening periods
+                      isShared: isShared
                   };
               }).filter(s => s.name);
 
@@ -265,7 +270,7 @@ const Management: React.FC = () => {
               setTimeout(() => alert("Lỗi khi đọc file Excel."), 100);
           }
       };
-      reader.readAsBinaryString(file);
+      reader.readAsArrayBuffer(file);
   };
 
   const handleClassFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -278,18 +283,18 @@ const Management: React.FC = () => {
       const reader = new FileReader();
       reader.onload = (evt) => {
           try {
-              const bstr = evt.target?.result;
-              const wb = XLSX.read(bstr, { type: 'binary' });
+              const data = new Uint8Array(evt.target?.result as ArrayBuffer);
+              const wb = XLSX.read(data, { type: 'array' });
               const wsname = wb.SheetNames[0];
               const ws = wb.Sheets[wsname];
-              const data = XLSX.utils.sheet_to_json(ws, { header: 1 });
+              const json = XLSX.utils.sheet_to_json(ws, { header: 1 });
 
-              if (!data || data.length < 2) {
+              if (!json || json.length < 2) {
                   setTimeout(() => alert("File Excel rỗng hoặc không đúng định dạng!"), 100);
                   return;
               }
 
-              const rows = data.slice(1) as any[];
+              const rows = json.slice(1) as any[];
               
               // Map columns: 0: Name, 1: Major Name, 2: Student Count, 3: School Year, 4: Campus, 5: Session
               const newClasses = rows.map(row => {
@@ -324,7 +329,7 @@ const Management: React.FC = () => {
               setTimeout(() => alert("Lỗi khi đọc file Excel."), 100);
           }
       };
-      reader.readAsBinaryString(file);
+      reader.readAsArrayBuffer(file);
   };
 
   const handleSaveClass = () => {
@@ -552,8 +557,8 @@ const Management: React.FC = () => {
                       <div className="relative group">
                         <HelpCircle size={18} className="text-gray-400 cursor-help" />
                         <div className="absolute right-0 top-8 w-64 p-2 bg-gray-800 text-white text-xs rounded shadow-lg z-10 hidden group-hover:block">
-                           File Excel: <strong>Tên môn | Ngành học | Số tiết (Ngày) | Số tiết (Tối)</strong>
-                           <br/><span className="text-[10px] opacity-75">Tên Ngành cần khớp với hệ thống.</span>
+                           File Excel: <strong>Tên môn | Ngành học | Số tiết (Ngày) | Số tiết (Tối) | Môn chung (x)</strong>
+                           <br/><span className="text-[10px] opacity-75">Tên Ngành cần khớp với hệ thống. Cột cuối đánh dấu 'x' nếu là lớp ghép.</span>
                         </div>
                      </div>
                  </div>
