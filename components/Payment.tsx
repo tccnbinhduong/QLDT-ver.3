@@ -2,7 +2,7 @@
 import React, { useMemo, useState } from 'react';
 import { useApp } from '../store/AppContext';
 import { ScheduleStatus } from '../types';
-import *as XLSX from 'xlsx';
+import XLSX from 'xlsx';
 import ExcelJS from 'exceljs'; // Import ExcelJS
 import saveAs from 'file-saver';
 import { Download, Trash2, CheckCircle, CreditCard, FileSpreadsheet } from 'lucide-react';
@@ -25,7 +25,7 @@ const Payment: React.FC = () => {
 
   // Calculate Completed Subjects (Finished)
   const completedSubjects = useMemo(() => {
-    const results: any[] = [];
+    const rawResults: any[] = [];
     
     classes.forEach(cls => {
         const isH8 = cls.name.toUpperCase().includes('H8');
@@ -59,20 +59,43 @@ const Payment: React.FC = () => {
 
                  const effectiveTotal = getEffectiveTotalPeriods(sub, cls);
 
-                 results.push({
+                 rawResults.push({
                      subjectId: sub.id,
                      classId: cls.id,
                      uniqueKey: uniqueKey,
                      subjectName: sub.name,
                      className: cls.name,
                      teacherName: teacherNames || "Chưa xác định",
-                     totalPeriods: effectiveTotal
+                     totalPeriods: effectiveTotal,
+                     isShared: sub.isShared
                  });
             }
         });
     });
+
+    // Aggregation Logic for Shared Subjects
+    const aggregatedResults: any[] = [];
+    const sharedMap = new Map<string, any>(); // Key: subjectId-teacherName (To distinguish same subject taught by different teachers if any)
+
+    rawResults.forEach(item => {
+        if (item.isShared) {
+            const key = `${item.subjectId}-${item.teacherName}`;
+            if (sharedMap.has(key)) {
+                // Append class name to existing entry
+                const existing = sharedMap.get(key);
+                existing.className = `${existing.className}, ${item.className}`;
+            } else {
+                // Create new entry (clone to avoid mutation issues if raw needed elsewhere)
+                const newItem = { ...item };
+                sharedMap.set(key, newItem);
+                aggregatedResults.push(newItem);
+            }
+        } else {
+            aggregatedResults.push(item);
+        }
+    });
     
-    return results;
+    return aggregatedResults;
   }, [subjects, schedules, classes, teachers, paidItems]);
 
   const handleDelete = (key: string) => {
@@ -118,7 +141,8 @@ const Payment: React.FC = () => {
     ws['!cols'] = [{ wch: 25 }, { wch: 15 }, { wch: 12 }, { wch: 20 }, { wch: 10 }, { wch: 30 }];
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, "ChiTietMonHoc");
-    XLSX.writeFile(wb, `ThongKe_${item.subjectName}_${item.className}.xlsx`);
+    // Updated Filename: TTGD_Tên giáo viên_Môn dạy_Lớp dạy
+    XLSX.writeFile(wb, `TTGD_${item.teacherName}_${item.subjectName}_${item.className}.xlsx`);
   };
 
   const exportExcelTemplate = async (item: any) => {
@@ -275,7 +299,8 @@ const Payment: React.FC = () => {
           // 7. Write Buffer and Save
           const outBuffer = await workbook.xlsx.writeBuffer();
           const blob = new Blob([outBuffer], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
-          saveAs(blob, `PhieuThanhToan_${item.subjectName}.xlsx`);
+          // Updated Filename: TTGD_Tên giáo viên_Môn dạy_Lớp dạy
+          saveAs(blob, `TTGD_${item.teacherName}_${item.subjectName}_${item.className}.xlsx`);
 
       } catch (error) {
           console.error(error);

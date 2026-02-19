@@ -55,7 +55,9 @@ const TeachingProgress: React.FC = () => {
       };
 
       // Find the teacher ID based on name to pre-select
-      const matchedTeacher = teachers.find(t => t.name === subject.teacher1);
+      // Prioritize the actual assigned teacher name if possible, otherwise subject.teacher1
+      const teacherName = subject.assignedTeacherName || subject.teacher1;
+      const matchedTeacher = teachers.find(t => t.name === teacherName);
 
       setEditingItem({
           subjectId: subject.id,
@@ -142,6 +144,18 @@ const TeachingProgress: React.FC = () => {
       
       const examSchedule = relevantSchedules.find(s => s.type === 'exam');
 
+      // --- TEACHER DISPLAY LOGIC ---
+      // Get unique teachers from actual schedule
+      const scheduledTeacherIds = Array.from(new Set(relevantSchedules.map(s => s.teacherId)));
+      const scheduledTeacherNames = scheduledTeacherIds
+        .map(tid => teachers.find(t => t.id === tid)?.name)
+        .filter(Boolean);
+      
+      // If schedule exists, join names. Else fallback to subject default teacher.
+      const assignedTeacherName = scheduledTeacherNames.length > 0 
+        ? scheduledTeacherNames.join(', ') 
+        : sub.teacher1;
+
       // --- DATE CALCULATION (Prioritize Metadata) ---
       let startDate = '--/--/----';
       let endDate = '--/--/----';
@@ -180,6 +194,7 @@ const TeachingProgress: React.FC = () => {
               startDate,
               endDate,
               examDate,
+              assignedTeacherName,
               isCustomized: false
           };
       }
@@ -259,6 +274,7 @@ const TeachingProgress: React.FC = () => {
         startDate,
         endDate,
         examDate,
+        assignedTeacherName,
         isCustomized: !!metadata.statusOverride || !!metadata.customStartDate
       };
     }).sort((a, b) => {
@@ -368,7 +384,7 @@ const TeachingProgress: React.FC = () => {
                              </h4>
                              <div className="flex items-center text-sm text-gray-500 mt-1">
                                 <User size={14} className="mr-1" />
-                                {subject.teacher1 || <span className="italic text-gray-400">Chưa phân công</span>}
+                                {subject.assignedTeacherName || <span className="italic text-gray-400">Chưa phân công</span>}
                              </div>
                         </div>
                      </div>
