@@ -3,7 +3,7 @@ import React, { useEffect, useState, useMemo } from 'react';
 import { useApp } from '../store/AppContext';
 import { BookOpen, Users, Calendar, Clock, AlertTriangle, CheckCircle } from 'lucide-react';
 import { format, isSameDay } from 'date-fns';
-import { vi } from 'date-fns/locale/vi';
+import { vi } from 'date-fns/locale';
 import { parseLocal, determineStatus, isSubjectFinished, getEffectiveTotalPeriods } from '../utils';
 import { ScheduleStatus } from '../types';
 
@@ -44,7 +44,7 @@ const Dashboard: React.FC = () => {
   });
 
   const completedSubjects = useMemo(() => {
-    const results: any[] = [];
+    const rawResults: any[] = [];
     
     classes.forEach(cls => {
         const isH8 = cls.name.toUpperCase().includes('H8');
@@ -70,31 +70,69 @@ const Dashboard: React.FC = () => {
                     sch.subjectId === sub.id && 
                     sch.classId === cls.id && 
                     sch.status !== ScheduleStatus.OFF
-                );
+                ).sort((a, b) => {
+                    // Sort by date then period to determine the "Schedule Signature"
+                    const timeA = new Date(a.date).getTime();
+                    const timeB = new Date(b.date).getTime();
+                    return timeA - timeB || a.startPeriod - b.startPeriod;
+                });
+                
+                if (relevantSchedules.length === 0) return;
 
                  const teacherIds = Array.from(new Set(relevantSchedules.map(s => s.teacherId)));
                  const teacherNames = teacherIds.map(tid => teachers.find(t => t.id === tid)?.name || 'GV đã xóa').join(', ');
 
                  // Calculate End Date: Sort by date and take the last one
-                 relevantSchedules.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
                  const lastSchedule = relevantSchedules[relevantSchedules.length - 1];
                  const endDate = lastSchedule ? format(parseLocal(lastSchedule.date), 'dd/MM/yyyy') : 'N/A';
                  
+                 // Create a signature based on the first session (Date + StartPeriod)
+                 const firstSch = relevantSchedules[0];
+                 const scheduleSignature = `${firstSch.date}-${firstSch.startPeriod}`;
+
                  const effectiveTotal = getEffectiveTotalPeriods(sub, cls);
 
-                 results.push({
+                 rawResults.push({
+                     subjectId: sub.id,
                      uniqueKey: uniqueKey,
                      subjectName: sub.name,
                      className: cls.name,
                      teacherName: teacherNames || "Chưa xác định",
                      totalPeriods: effectiveTotal,
-                     endDate: endDate
+                     endDate: endDate,
+                     isShared: sub.isShared,
+                     scheduleSignature: scheduleSignature // Add signature for grouping
                  });
             }
         });
     });
+
+    // Aggregation Logic for Shared Subjects
+    const aggregatedResults: any[] = [];
+    const sharedMap = new Map<string, any>(); 
+
+    rawResults.forEach(item => {
+        if (item.isShared) {
+            // Group by Subject ID + Teacher Name + Schedule Signature
+            // This ensures classes taught at different times (different signature) are NOT merged.
+            const key = `${item.subjectId}-${item.teacherName}-${item.scheduleSignature}`;
+            
+            if (sharedMap.has(key)) {
+                // Append class name to existing entry
+                const existing = sharedMap.get(key);
+                existing.className = `${existing.className}, ${item.className}`;
+            } else {
+                // Create new entry
+                const newItem = { ...item };
+                sharedMap.set(key, newItem);
+                aggregatedResults.push(newItem);
+            }
+        } else {
+            aggregatedResults.push(item);
+        }
+    });
     
-    return results;
+    return aggregatedResults;
   }, [subjects, schedules, classes, teachers, paidItems]);
 
   return (
@@ -219,7 +257,7 @@ const Dashboard: React.FC = () => {
       <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-200">
         <h2 className="text-lg font-semibold mb-4 flex items-center">
           <CheckCircle className="mr-2 text-green-500" size={20} />
-          Môn học đã kết thúc
+          Môn học đã kết thúc (Chờ thanh toán)
         </h2>
         
         {completedSubjects.length > 0 ? (

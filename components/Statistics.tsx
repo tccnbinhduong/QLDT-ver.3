@@ -3,14 +3,15 @@ import React, { useMemo, useState } from 'react';
 import { useApp } from '../store/AppContext';
 import { ScheduleStatus, ScheduleItem } from '../types';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
-import *as XLSX from 'xlsx';
-import { Download, AlertCircle, X } from 'lucide-react';
+import XLSX from 'xlsx';
+import { Download, AlertCircle, X, User, BookOpen, Layers } from 'lucide-react';
 import { format } from 'date-fns';
 import { parseLocal, isSubjectFinished, getEffectiveTotalPeriods } from '../utils';
 
 const Statistics: React.FC = () => {
   const { teachers, schedules, subjects, classes } = useApp();
   const [showAlert, setShowAlert] = useState(true);
+  const [selectedTeacher, setSelectedTeacher] = useState<any>(null); // State for modal
 
   // 1. Missed classes needing makeup
   // Logic: Filter out if Subject is Finished OR if there are corresponding Makeup sessions
@@ -107,7 +108,23 @@ const Statistics: React.FC = () => {
         const uniqueClassIds = Array.from(new Set(allSchedules.map(s => s.classId)));
         const classNames = uniqueClassIds.map(id => classes.find(c => c.id === id)?.name).filter(Boolean).join(', ');
 
-        // 2. Start and End Dates
+        // 2. Subject Breakdown (NEW)
+        const uniqueSubjectIds = Array.from(new Set(allSchedules.map(s => s.subjectId)));
+        const subjectDetailsArray = uniqueSubjectIds.map(subId => {
+            const sub = subjects.find(s => s.id === subId);
+            if (!sub) return null;
+            
+            // Get schedules for this specific subject taught by this teacher
+            const subSchedules = allSchedules.filter(s => s.subjectId === subId);
+            // Calculate periods using the unique slot logic (in case of shared classes within the same subject)
+            const periods = calculateUniquePeriods(subSchedules);
+            
+            return `${sub.name} (${periods} tiết)`;
+        }).filter(Boolean);
+        
+        const subjectDetails = subjectDetailsArray.join(', ');
+
+        // 3. Start and End Dates (Keeping calculation for internal use if needed, but removed from export)
         let startDate = '';
         let endDate = '';
         if (allSchedules.length > 0) {
@@ -121,6 +138,7 @@ const Statistics: React.FC = () => {
           activePeriods: activeLoad,
           taughtPeriods: taughtLoad,
           classList: classNames,
+          subjectDetails: subjectDetails, // NEW field
           startDate,
           endDate
         };
@@ -147,15 +165,28 @@ const Statistics: React.FC = () => {
         });
         
         classSubjects.forEach(sub => {
+             // Fetch relevant schedules and sort to determine signature
              const relevantSchedules = schedules.filter(sch => 
                 sch.subjectId === sub.id && 
                 sch.classId === cls.id && 
                 sch.status !== ScheduleStatus.OFF
-            );
+            ).sort((a, b) => {
+                const timeA = new Date(a.date).getTime();
+                const timeB = new Date(b.date).getTime();
+                return timeA - timeB || a.startPeriod - b.startPeriod;
+            });
             
             const learned = relevantSchedules.reduce((acc, curr) => acc + curr.periodCount, 0);
             const effectiveTotal = getEffectiveTotalPeriods(sub, cls);
             const remaining = Math.max(0, effectiveTotal - learned);
+
+            // Determine Schedule Signature (Date + StartPeriod + Teacher of the first session)
+            // This distinguishes shared subjects taught at different times/teachers
+            let signature = 'unscheduled';
+            if (relevantSchedules.length > 0) {
+                const first = relevantSchedules[0];
+                signature = `${first.date}-${first.startPeriod}-${first.teacherId}`;
+            }
             
             // Only show subjects that are "currently learning"
             if (learned > 0 && remaining > 0) {
@@ -166,7 +197,8 @@ const Statistics: React.FC = () => {
                      total: effectiveTotal,
                      learned: learned,
                      remaining: remaining,
-                     isShared: sub.isShared
+                     isShared: sub.isShared,
+                     signature: signature // NEW: Add signature for grouping
                  });
             }
         });
@@ -174,12 +206,13 @@ const Statistics: React.FC = () => {
 
     // Step 2: Aggregate shared subjects
     const aggregatedResults: any[] = [];
-    const sharedMap = new Map<string, any>(); // Key: subjectId-learnedCount
+    const sharedMap = new Map<string, any>(); // Key: subjectId-signature
 
     rawStats.forEach(item => {
         if (item.isShared) {
-            // Group by Subject ID AND Progress (Learned count) to ensure distinct batches are separated
-            const key = `${item.id}-${item.learned}`;
+            // Group by Subject ID AND Schedule Signature
+            // This ensures distinct batches (different time/teacher) are separated in the chart
+            const key = `${item.id}-${item.signature}`;
             
             if (sharedMap.has(key)) {
                 // Already exists, just append class name
@@ -219,11 +252,11 @@ const Statistics: React.FC = () => {
      // Prepare data for all teachers (even those with 0 active periods)
      const data = teacherStats.map(t => ({
          'Họ và tên': t.name,
-         'Số tiết đang dạy (Môn chưa kết thúc)': t.activePeriods,
-         'Số tiết đã dạy (Thực tế đã hoàn thành)': t.taughtPeriods,
+         'Số tiết đang dạy (Chưa kết thúc)': t.activePeriods,
+         'Số tiết đã dạy': t.taughtPeriods,
          'Các lớp giảng dạy': t.classList,
-         'Ngày bắt đầu': t.startDate,
-         'Ngày kết thúc': t.endDate
+         'Các môn đã dạy kèm số tiết': t.subjectDetails // NEW Column
+         // Removed StartDate/EndDate
      }));
     
     const ws = XLSX.utils.json_to_sheet(data);
@@ -231,11 +264,10 @@ const Statistics: React.FC = () => {
     // Set column widths
     ws['!cols'] = [
         { wch: 25 }, // Name
-        { wch: 35 }, // Active
-        { wch: 35 }, // Taught
+        { wch: 30 }, // Active
+        { wch: 20 }, // Taught
         { wch: 40 }, // Classes
-        { wch: 15 }, // Start Date
-        { wch: 15 }  // End Date
+        { wch: 60 }, // Subjects (Wider)
     ];
 
     const wb = XLSX.utils.book_new();
@@ -284,14 +316,21 @@ const Statistics: React.FC = () => {
               </button>
            </div>
            <p className="text-xs text-gray-500 mb-2 italic">
-               * Biểu đồ chỉ hiển thị tải công việc hiện tại (các môn chưa kết thúc). <br/>
-               * Môn học ghép (nhiều lớp học cùng lúc) chỉ được tính là 1 lần giảng dạy.<br/>
-               * Nhấn "Xuất Thống Kê Tổng" để xem chi tiết lịch sử, ngày dạy và danh sách lớp.
+               * Click vào cột để xem chi tiết thông tin giáo viên.<br/>
+               * Môn học ghép (nhiều lớp học cùng lúc) chỉ được tính là 1 lần giảng dạy.
            </p>
            {chartData.length > 0 ? (
              <div className="flex-1 min-h-0">
                <ResponsiveContainer width="100%" height="100%">
-                 <BarChart data={chartData}>
+                 <BarChart 
+                    data={chartData}
+                    onClick={(data) => {
+                        if (data && data.activePayload && data.activePayload.length > 0) {
+                            setSelectedTeacher(data.activePayload[0].payload);
+                        }
+                    }}
+                    className="cursor-pointer"
+                 >
                    <CartesianGrid strokeDasharray="3 3" vertical={false} />
                    <XAxis dataKey="name" tick={{fontSize: 11}} interval={0} angle={-15} textAnchor="end" height={60} />
                    <YAxis />
@@ -334,6 +373,70 @@ const Statistics: React.FC = () => {
            </div>
         </div>
       </div>
+
+      {/* Teacher Detail Modal */}
+      {selectedTeacher && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" onClick={() => setSelectedTeacher(null)}>
+            <div className="bg-white rounded-xl shadow-xl w-full max-w-lg overflow-hidden animate-in fade-in zoom-in duration-200" onClick={e => e.stopPropagation()}>
+                <div className="p-4 border-b bg-blue-50 flex justify-between items-center">
+                    <h3 className="font-bold text-blue-800 text-lg flex items-center gap-2">
+                        <User size={20} /> Thông tin Giáo viên
+                    </h3>
+                    <button onClick={() => setSelectedTeacher(null)} className="text-gray-400 hover:text-red-500">
+                        <X size={24} />
+                    </button>
+                </div>
+                <div className="p-6 space-y-4">
+                    <div className="text-center pb-4 border-b">
+                         <div className="text-2xl font-bold text-gray-800">{selectedTeacher.name}</div>
+                    </div>
+                    
+                    <div className="grid grid-cols-2 gap-4">
+                        <div className="bg-blue-50 p-3 rounded-lg border border-blue-100">
+                            <div className="text-xs text-blue-600 uppercase font-bold">Số tiết đang dạy</div>
+                            <div className="text-xl font-bold text-blue-800 mt-1">{selectedTeacher.activePeriods}</div>
+                        </div>
+                        <div className="bg-green-50 p-3 rounded-lg border border-green-100">
+                            <div className="text-xs text-green-600 uppercase font-bold">Số tiết đã dạy</div>
+                            <div className="text-xl font-bold text-green-800 mt-1">{selectedTeacher.taughtPeriods}</div>
+                        </div>
+                    </div>
+
+                    <div>
+                        <div className="text-sm font-bold text-gray-700 mb-1 flex items-center gap-2">
+                            <Layers size={16} className="text-gray-500" /> Các lớp giảng dạy
+                        </div>
+                        <div className="bg-gray-50 p-3 rounded text-sm text-gray-700">
+                            {selectedTeacher.classList || "Chưa có lớp nào"}
+                        </div>
+                    </div>
+
+                    <div>
+                        <div className="text-sm font-bold text-gray-700 mb-1 flex items-center gap-2">
+                            <BookOpen size={16} className="text-gray-500" /> Chi tiết môn học
+                        </div>
+                        <div className="bg-gray-50 p-3 rounded text-sm text-gray-700 max-h-40 overflow-y-auto">
+                            {selectedTeacher.subjectDetails ? (
+                                <ul className="list-disc pl-4 space-y-1">
+                                    {selectedTeacher.subjectDetails.split(', ').map((item: string, idx: number) => (
+                                        <li key={idx}>{item}</li>
+                                    ))}
+                                </ul>
+                            ) : "Chưa có dữ liệu"}
+                        </div>
+                    </div>
+                </div>
+                <div className="p-4 bg-gray-50 border-t flex justify-end">
+                    <button 
+                        onClick={() => setSelectedTeacher(null)}
+                        className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 transition"
+                    >
+                        Đóng
+                    </button>
+                </div>
+            </div>
+        </div>
+      )}
     </div>
   );
 };

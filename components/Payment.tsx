@@ -2,7 +2,7 @@
 import React, { useMemo, useState } from 'react';
 import { useApp } from '../store/AppContext';
 import { ScheduleStatus } from '../types';
-import *as XLSX from 'xlsx';
+import XLSX from 'xlsx';
 import ExcelJS from 'exceljs'; // Import ExcelJS
 import saveAs from 'file-saver';
 import { Download, Trash2, CheckCircle, CreditCard, FileSpreadsheet } from 'lucide-react';
@@ -51,8 +51,21 @@ const Payment: React.FC = () => {
                     sch.subjectId === sub.id && 
                     sch.classId === cls.id && 
                     sch.status !== ScheduleStatus.OFF
-                );
+                ).sort((a, b) => {
+                    // Sort by date then period to determine the "Schedule Signature"
+                    const timeA = new Date(a.date).getTime();
+                    const timeB = new Date(b.date).getTime();
+                    return timeA - timeB || a.startPeriod - b.startPeriod;
+                });
                 
+                if (relevantSchedules.length === 0) return;
+
+                 // Create a signature based on the first session (Date + StartPeriod)
+                 // This ensures that if the same teacher teaches the same subject to different groups at different times,
+                 // they will have different signatures.
+                 const firstSch = relevantSchedules[0];
+                 const scheduleSignature = `${firstSch.date}-${firstSch.startPeriod}`;
+
                  // Get list of teachers who taught this subject for this class
                  const teacherIds = Array.from(new Set(relevantSchedules.map(s => s.teacherId)));
                  const teacherNames = teacherIds.map(tid => teachers.find(t => t.id === tid)?.name || 'GV đã xóa').join(', ');
@@ -67,7 +80,8 @@ const Payment: React.FC = () => {
                      className: cls.name,
                      teacherName: teacherNames || "Chưa xác định",
                      totalPeriods: effectiveTotal,
-                     isShared: sub.isShared
+                     isShared: sub.isShared,
+                     scheduleSignature: scheduleSignature // Add signature for grouping
                  });
             }
         });
@@ -75,32 +89,44 @@ const Payment: React.FC = () => {
 
     // Aggregation Logic for Shared Subjects
     const aggregatedResults: any[] = [];
-    const sharedMap = new Map<string, any>(); // Key: subjectId-teacherName (To distinguish same subject taught by different teachers if any)
+    const sharedMap = new Map<string, any>(); 
 
     rawResults.forEach(item => {
         if (item.isShared) {
-            const key = `${item.subjectId}-${item.teacherName}`;
+            // UPDATED: Group by Subject ID + Teacher Name + Schedule Signature
+            // This ensures classes taught at different times (different signature) are NOT merged.
+            const key = `${item.subjectId}-${item.teacherName}-${item.scheduleSignature}`;
+            
             if (sharedMap.has(key)) {
                 // Append class name to existing entry
                 const existing = sharedMap.get(key);
                 existing.className = `${existing.className}, ${item.className}`;
+                
+                // Track all uniqueKeys in this group for deletion
+                if (!existing.subKeys) existing.subKeys = [existing.uniqueKey];
+                existing.subKeys.push(item.uniqueKey);
             } else {
                 // Create new entry (clone to avoid mutation issues if raw needed elsewhere)
-                const newItem = { ...item };
+                const newItem = { ...item, subKeys: [item.uniqueKey] };
                 sharedMap.set(key, newItem);
                 aggregatedResults.push(newItem);
             }
         } else {
-            aggregatedResults.push(item);
+            aggregatedResults.push({ ...item, subKeys: [item.uniqueKey] });
         }
     });
     
     return aggregatedResults;
   }, [subjects, schedules, classes, teachers, paidItems]);
 
-  const handleDelete = (key: string) => {
+  const handleDelete = (item: any) => {
+    // Confirm delete
+    if (!window.confirm(`Bạn có chắc chắn muốn xóa (ẩn) môn ${item.subjectName} của lớp ${item.className}?`)) return;
+
     setPaidItems(prev => {
-        const newPaidItems = [...prev, key];
+        // Hide all classes involved in this group
+        const keysToAdd = item.subKeys || [item.uniqueKey];
+        const newPaidItems = [...prev, ...keysToAdd];
         localStorage.setItem('paid_completed_subjects', JSON.stringify(newPaidItems));
         return newPaidItems;
     });
@@ -356,7 +382,7 @@ const Payment: React.FC = () => {
                                 </td>
                                 <td className="p-4 text-center">
                                     <button
-                                        onClick={() => handleDelete(item.uniqueKey)}
+                                        onClick={() => handleDelete(item)}
                                         className="bg-red-50 hover:bg-red-100 text-red-600 px-3 py-1.5 rounded text-sm font-medium transition-colors flex items-center justify-center mx-auto"
                                     >
                                         <Trash2 size={14} className="mr-1" /> Xóa
