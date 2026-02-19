@@ -123,6 +123,8 @@ export const checkConflict = (
             // If it's a shared subject but different teacher/room, fall through to standard checks.
         }
 
+        const conflictClassName = classes.find(c => c.id === item.classId)?.name || 'Lớp không xác định';
+
         // Standard Checks for Normal Subjects (or non-matching Shared Subjects)
         if (item.roomId === newItem.roomId) {
              // Check Campus Logic: If classes are in different campuses, same room name is allowed.
@@ -135,12 +137,19 @@ export const checkConflict = (
              if (campusA !== 0 && campusB !== 0 && campusA !== campusB) {
                  // No conflict (Different physical locations)
              } else {
-                 return { hasConflict: true, message: `Trùng phòng học: ${item.roomId} đã có lớp.` };
+                 return { hasConflict: true, message: `Trùng phòng học ${item.roomId}: Đang có lớp ${conflictClassName} học.` };
              }
         }
         
         if (item.teacherId === newItem.teacherId) {
-             return { hasConflict: true, message: `Trùng giáo viên: GV này đang dạy lớp khác.` };
+             // UPDATE: If either item is an EXAM, ignore teacher conflict.
+             // Teacher name on exam schedule is informational (Responsible Teacher), not necessarily blocking availability.
+             const isItemExam = item.type === 'exam';
+             const isNewItemExam = newItem.type === 'exam';
+
+             if (!isItemExam && !isNewItemExam) {
+                 return { hasConflict: true, message: `Trùng giáo viên: GV này đang dạy lớp ${conflictClassName}.` };
+             }
         }
         if (item.classId === newItem.classId) {
              return { hasConflict: true, message: `Trùng lịch học của lớp: Lớp này đang học môn khác.` };

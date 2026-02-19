@@ -58,11 +58,20 @@ const HolidayManager: React.FC = () => {
   // Get unique years from holidays for filter dropdown
   const uniqueYears = useMemo(() => {
       const years = new Set<number>();
-      years.add(new Date().getFullYear()); // Always include current year
+      const currentYear = new Date().getFullYear();
+
+      // Explicitly add requested years and current context
+      years.add(2024);
+      years.add(2025);
+      years.add(currentYear);
+      years.add(currentYear + 1); // Add next year for planning
+
+      // Add years present in holiday data
       holidays.forEach(h => {
           years.add(parseLocal(h.startDate).getFullYear());
           years.add(parseLocal(h.endDate).getFullYear());
       });
+      
       return Array.from(years).sort((a, b) => b - a); // Descending
   }, [holidays]);
 

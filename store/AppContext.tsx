@@ -1,5 +1,5 @@
 
-import React, { createContext, useContext, useState, useEffect } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import { Teacher, Subject, ClassEntity, ScheduleItem, Major, ScheduleStatus, Student, AppState, DocumentItem, ExportTemplate, Holiday } from '../types';
 import { generateId } from '../utils';
 
@@ -32,6 +32,11 @@ interface AppContextType extends AppState {
   deleteHoliday: (id: string) => void;
   loadData: (data: AppState) => void;
   resetData: () => void;
+  // Undo/Redo
+  undo: () => void;
+  redo: () => void;
+  canUndo: boolean;
+  canRedo: boolean;
 }
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
@@ -108,6 +113,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   });
 
+  // History State for Undo/Redo
+  const [history, setHistory] = useState<AppState[]>([]);
+  const [future, setFuture] = useState<AppState[]>([]);
+
   useEffect(() => {
     try {
       localStorage.setItem('eduScheduleData', JSON.stringify(state));
@@ -117,19 +126,62 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   }, [state]);
 
+  // Helper to save state before modification
+  const saveStateForUndo = () => {
+      setHistory(prev => {
+          const newHistory = [...prev, state];
+          // Limit history size to 30 steps to save memory
+          if (newHistory.length > 30) {
+              return newHistory.slice(newHistory.length - 30);
+          }
+          return newHistory;
+      });
+      setFuture([]); // Clear future when a new action is taken
+  };
+
+  const undo = useCallback(() => {
+      if (history.length === 0) return;
+      
+      const previous = history[history.length - 1];
+      const newHistory = history.slice(0, -1);
+      
+      setFuture(prev => [state, ...prev]);
+      setState(previous);
+      setHistory(newHistory);
+  }, [history, state]);
+
+  const redo = useCallback(() => {
+      if (future.length === 0) return;
+
+      const next = future[0];
+      const newFuture = future.slice(1);
+
+      setHistory(prev => [...prev, state]);
+      setState(next);
+      setFuture(newFuture);
+  }, [future, state]);
+
+  // --------------------------------------------------------
+  // MODIFIERS (Wrapped with saveStateForUndo)
+  // --------------------------------------------------------
+
   const addTeacher = (t: Omit<Teacher, 'id'>) => {
+    saveStateForUndo();
     setState(prev => ({ ...prev, teachers: [...prev.teachers, { ...t, id: generateId() }] }));
   };
   const updateTeacher = (id: string, t: Partial<Teacher>) => {
+    saveStateForUndo();
     setState(prev => ({
         ...prev,
         teachers: prev.teachers.map(tea => tea.id === id ? { ...tea, ...t } : tea)
     }))
   }
   const deleteTeacher = (id: string) => {
+    saveStateForUndo();
     setState(prev => ({ ...prev, teachers: prev.teachers.filter(t => t.id !== id) }));
   };
   const importTeachers = (newTeachers: Omit<Teacher, 'id'>[]) => {
+      saveStateForUndo();
       setState(prev => ({
           ...prev,
           teachers: [...prev.teachers, ...newTeachers.map(t => ({...t, id: generateId()}))]
@@ -137,18 +189,22 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   }
 
   const addSubject = (s: Omit<Subject, 'id'>) => {
+    saveStateForUndo();
     setState(prev => ({ ...prev, subjects: [...prev.subjects, { ...s, id: generateId() }] }));
   };
   const updateSubject = (id: string, s: Partial<Subject>) => {
+    saveStateForUndo();
     setState(prev => ({
         ...prev,
         subjects: prev.subjects.map(sub => sub.id === id ? { ...sub, ...s } : sub)
     }))
   };
   const deleteSubject = (id: string) => {
+    saveStateForUndo();
     setState(prev => ({ ...prev, subjects: prev.subjects.filter(s => s.id !== id) }));
   };
   const importSubjects = (newSubjects: Omit<Subject, 'id'>[]) => {
+      saveStateForUndo();
       setState(prev => ({
           ...prev,
           subjects: [...prev.subjects, ...newSubjects.map(s => ({...s, id: generateId()}))]
@@ -156,18 +212,22 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   }
 
   const addClass = (c: Omit<ClassEntity, 'id'>) => {
+    saveStateForUndo();
     setState(prev => ({ ...prev, classes: [...prev.classes, { ...c, id: generateId() }] }));
   };
   const updateClass = (id: string, c: Partial<ClassEntity>) => {
+    saveStateForUndo();
     setState(prev => ({
         ...prev,
         classes: prev.classes.map(cls => cls.id === id ? { ...cls, ...c } : cls)
     }))
   };
   const deleteClass = (id: string) => {
+    saveStateForUndo();
     setState(prev => ({ ...prev, classes: prev.classes.filter(c => c.id !== id) }));
   };
   const importClasses = (newClasses: Omit<ClassEntity, 'id'>[]) => {
+      saveStateForUndo();
       setState(prev => ({
           ...prev,
           classes: [...prev.classes, ...newClasses.map(c => ({...c, id: generateId()}))]
@@ -175,18 +235,22 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   }
 
   const addStudent = (s: Omit<Student, 'id'>) => {
+    saveStateForUndo();
     setState(prev => ({ ...prev, students: [...prev.students, { ...s, id: generateId() }] }));
   };
   const updateStudent = (id: string, s: Partial<Student>) => {
+     saveStateForUndo();
      setState(prev => ({
         ...prev,
         students: prev.students.map(stu => stu.id === id ? { ...stu, ...s } : stu)
     }))
   };
   const deleteStudent = (id: string) => {
+    saveStateForUndo();
     setState(prev => ({ ...prev, students: prev.students.filter(s => s.id !== id) }));
   };
   const importStudents = (newStudents: Omit<Student, 'id'>[]) => {
+      saveStateForUndo();
       setState(prev => ({
           ...prev,
           students: [...prev.students, ...newStudents.map(s => ({...s, id: generateId()}))]
@@ -194,11 +258,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   }
 
   const addSchedule = (s: Omit<ScheduleItem, 'id' | 'status'>) => {
+    saveStateForUndo();
     const newItem: ScheduleItem = { ...s, id: generateId(), status: ScheduleStatus.PENDING };
     setState(prev => ({ ...prev, schedules: [...prev.schedules, newItem] }));
   };
 
   const updateSchedule = (id: string, s: Partial<ScheduleItem>) => {
+    saveStateForUndo();
     setState(prev => {
         const updatedList = prev.schedules.map(item => item.id === id ? { ...item, ...s } : item);
         return { ...prev, schedules: updatedList };
@@ -206,33 +272,40 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const deleteSchedule = (id: string) => {
+    saveStateForUndo();
     setState(prev => ({ ...prev, schedules: prev.schedules.filter(s => s.id !== id) }));
   };
 
   // Document actions
   const addDocument = (d: Omit<DocumentItem, 'id'>) => {
+    saveStateForUndo();
     setState(prev => ({ ...prev, documents: [...prev.documents, { ...d, id: generateId() }] }));
   };
 
   const deleteDocument = (id: string) => {
+    saveStateForUndo();
     setState(prev => ({ ...prev, documents: prev.documents.filter(d => d.id !== id) }));
   };
 
   // Template actions
   const addTemplate = (t: Omit<ExportTemplate, 'id'>) => {
+    saveStateForUndo();
     setState(prev => ({ ...prev, templates: [...prev.templates, { ...t, id: generateId() }] }));
   };
   
   const deleteTemplate = (id: string) => {
+     saveStateForUndo();
      setState(prev => ({ ...prev, templates: prev.templates.filter(t => t.id !== id) }));
   };
 
   // Holiday actions
   const addHoliday = (h: Omit<Holiday, 'id'>) => {
+    saveStateForUndo();
     setState(prev => ({ ...prev, holidays: [...prev.holidays, { ...h, id: generateId() }] }));
   };
 
   const updateHoliday = (id: string, h: Partial<Holiday>) => {
+    saveStateForUndo();
     setState(prev => ({
         ...prev,
         holidays: prev.holidays.map(item => item.id === id ? { ...item, ...h } : item)
@@ -240,11 +313,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const deleteHoliday = (id: string) => {
+    saveStateForUndo();
     setState(prev => ({ ...prev, holidays: prev.holidays.filter(h => h.id !== id) }));
   };
 
   // NEW: Load entire state (Restore) - Robust Version
   const loadData = (data: AppState) => {
+      saveStateForUndo();
       if (data && typeof data === 'object') {
           // Merge with INITIAL_DATA to ensure all fields (especially arrays like templates/documents) exist
           // regardless of the backup version.
@@ -272,6 +347,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   // NEW: Delete all data (Empty state, but keep Majors config)
   const resetData = () => {
+    saveStateForUndo();
     setState({
         teachers: [],
         subjects: [],
@@ -304,7 +380,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       addDocument, deleteDocument,
       addTemplate, deleteTemplate,
       addHoliday, updateHoliday, deleteHoliday,
-      loadData, resetData
+      loadData, resetData,
+      undo, redo, canUndo: history.length > 0, canRedo: future.length > 0
     }}>
       {children}
     </AppContext.Provider>

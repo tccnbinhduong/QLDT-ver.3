@@ -4,8 +4,8 @@ import { useApp } from '../store/AppContext';
 import { checkConflict, calculateSubjectProgress, getSessionFromPeriod, parseLocal, determineStatus, getSessionSequenceInfo, generateId, base64ToArrayBuffer, getEffectiveTotalPeriods, isSubjectFinished, getCampusId } from '../utils';
 import { ScheduleItem, ScheduleStatus, Teacher } from '../types';
 import { format, addDays, isSameDay, getWeek } from 'date-fns';
-import { vi } from 'date-fns/locale/vi';
-import { Calendar as CalendarIcon, Plus, ChevronRight, ChevronLeft, AlertCircle, Save, Trash2, ListFilter, X, Copy, Clipboard, Users, Download, BookOpen, Mail, CalendarOff, Sun, Moon } from 'lucide-react';
+import { vi } from 'date-fns/locale';
+import { Calendar as CalendarIcon, Plus, ChevronRight, ChevronLeft, AlertCircle, Save, Trash2, ListFilter, X, Copy, Clipboard, Users, Download, BookOpen, Mail, CalendarOff, Sun, Moon, FileSpreadsheet } from 'lucide-react';
 import ExcelJS from 'exceljs';
 import PizZip from 'pizzip';
 import Docxtemplater from 'docxtemplater';
@@ -745,74 +745,205 @@ const ScheduleManager: React.FC = () => {
 
     const workbook = new ExcelJS.Workbook();
     const worksheet = workbook.addWorksheet('Lịch Học');
+    const schedulesForExport = filteredSchedules; 
+    
+    // Use the refactored append function with startRow = 1
+    const getDayDate = (dayOffset: number) => addDays(weekStart, dayOffset);
+    let localGridConfig;
+    const session = currentClass.session || 'Ban ngày';
 
-    const colCount = 2 + gridConfig.columns.length; 
+    if (session === 'Ban ngày') {
+          const cols = [];
+          for (let i = 0; i <= 5; i++) { 
+              const d = getDayDate(i);
+              cols.push({ date: d, label: format(d, 'EEEE', { locale: vi }), subLabel: format(d, 'dd/MM'), periodOffset: 0 });
+          }
+          localGridConfig = { columns: cols, rows: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10], type: 'standard' };
+    } else {
+          const cols = [];
+          for (let i = 0; i <= 5; i++) {
+              const d = getDayDate(i);
+              cols.push({ date: d, label: format(d, 'EEEE', { locale: vi }), subLabel: format(d, 'dd/MM'), periodOffset: 10 });
+          }
+          const sun = getDayDate(6);
+          cols.push({ date: sun, label: 'Sáng CN', subLabel: format(sun, 'dd/MM'), periodOffset: 0 });
+          cols.push({ date: sun, label: 'Chiều CN', subLabel: format(sun, 'dd/MM'), periodOffset: 5 });
+          localGridConfig = { columns: cols, rows: [1, 2, 3, 4, 5], type: 'matrix' };
+    }
+
+    // Initialize columns
     worksheet.columns = [
-      { width: 10 }, { width: 6 }, 
-      ...gridConfig.columns.map(() => ({ width: 25 }))
+        { width: 10 }, { width: 6 }, 
+        ...localGridConfig.columns.map(() => ({ width: 25 }))
     ];
 
-    const title = `LỊCH HỌC CỦA LỚP ${currentClass.name} TỪ NGÀY ${format(weekStart, 'dd/MM')} ĐẾN NGÀY ${format(addDays(weekStart, 6), 'dd/MM')}`.toUpperCase();
-    const titleRow = worksheet.addRow([title]);
-    const lastColLetter = String.fromCharCode(64 + colCount);
-    worksheet.mergeCells(`A1:${lastColLetter}1`);
-    
-    titleRow.font = { name: 'Arial', size: 14, bold: true };
-    titleRow.alignment = { horizontal: 'center', vertical: 'middle' };
-    titleRow.height = 30;
+    await appendClassScheduleToSheet(worksheet, 1, currentClass, schedulesForExport, localGridConfig);
 
-    // Header Row
-    const headerLabels = gridConfig.columns.map(col => `${col.label} - ${col.subLabel}`.toUpperCase());
-    const headerRow = worksheet.addRow(['Buổi', 'Tiết', ...headerLabels]);
-    headerRow.font = { name: 'Arial', size: 10, bold: true };
-    headerRow.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
-    headerRow.height = 30;
-    
-    headerRow.eachCell((cell) => {
-      cell.border = { top: { style: 'thin' }, left: { style: 'thin' }, bottom: { style: 'thin' }, right: { style: 'thin' } };
-      cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFFFFF' } };
-    });
+    const buffer = await workbook.xlsx.writeBuffer();
+    const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+    saveAs(blob, `Lich_Hoc_${currentClass.name}_Tuan_${weekNumber}.xlsx`);
+  };
 
+  const handleExportAllClassesExcel = async () => {
+    if (classes.length === 0) {
+        alert("Chưa có lớp nào trong hệ thống.");
+        return;
+    }
+
+    const workbook = new ExcelJS.Workbook();
+    
+    // 1. Prepare Data Buckets
+    const dayClasses = classes.filter(c => (c.session || 'Ban ngày') === 'Ban ngày');
+    const eveningClasses = classes.filter(c => c.session === 'Tối');
+
+    let hasData = false;
+    const getDayDate = (dayOffset: number) => addDays(weekStart, dayOffset);
+
+    // --- DAY SHEET SETUP ---
+    if (dayClasses.length > 0) {
+        const daySheet = workbook.addWorksheet('Lịch Ban Ngày');
+        
+        // Config: Mon(0) to Sat(5)
+        const cols = [];
+        for (let i = 0; i <= 5; i++) { 
+             const d = getDayDate(i);
+             cols.push({ date: d, label: format(d, 'EEEE', { locale: vi }), subLabel: format(d, 'dd/MM'), periodOffset: 0 });
+        }
+        const dayGridConfig = { columns: cols, rows: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10], type: 'standard' };
+        
+        // Set column widths globally for the sheet
+        daySheet.columns = [
+            { width: 10 }, { width: 6 }, 
+            ...cols.map(() => ({ width: 25 }))
+        ];
+        
+        let currentRow = 1;
+        for (const cls of dayClasses) {
+             const clsSchedules = schedules.filter(s => s.classId === cls.id);
+             // Append schedule and get next starting row
+             currentRow = await appendClassScheduleToSheet(daySheet, currentRow, cls, clsSchedules, dayGridConfig);
+             hasData = true;
+        }
+    }
+
+    // --- EVENING SHEET SETUP ---
+    if (eveningClasses.length > 0) {
+        const eveningSheet = workbook.addWorksheet('Lịch Buổi Tối');
+        
+        // Config: Mon-Sat (Evening) + Sun
+        const cols = [];
+        for (let i = 0; i <= 5; i++) {
+             const d = getDayDate(i);
+             cols.push({ date: d, label: format(d, 'EEEE', { locale: vi }), subLabel: format(d, 'dd/MM'), periodOffset: 10 });
+        }
+        const sun = getDayDate(6);
+        cols.push({ date: sun, label: 'Sáng CN', subLabel: format(sun, 'dd/MM'), periodOffset: 0 });
+        cols.push({ date: sun, label: 'Chiều CN', subLabel: format(sun, 'dd/MM'), periodOffset: 5 });
+        const eveningGridConfig = { columns: cols, rows: [1, 2, 3, 4, 5], type: 'matrix' };
+
+        eveningSheet.columns = [
+            { width: 10 }, { width: 6 }, 
+            ...cols.map(() => ({ width: 25 }))
+        ];
+
+        let currentRow = 1;
+        for (const cls of eveningClasses) {
+             const clsSchedules = schedules.filter(s => s.classId === cls.id);
+             currentRow = await appendClassScheduleToSheet(eveningSheet, currentRow, cls, clsSchedules, eveningGridConfig);
+             hasData = true;
+        }
+    }
+
+    if (!hasData) {
+        alert("Không có dữ liệu để xuất (Không có lớp nào).");
+        return;
+    }
+
+    const buffer = await workbook.xlsx.writeBuffer();
+    const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+    const dateStr = format(weekStart, 'dd-MM');
+    saveAs(blob, `Lich_Toan_Truong_Tuan_${weekNumber}_(${dateStr}).xlsx`);
+  };
+
+  // REFACTORED: Helper to append a single class schedule to a specific sheet at a startRow
+  const appendClassScheduleToSheet = async (worksheet: ExcelJS.Worksheet, startRow: number, cls: any, clsSchedules: ScheduleItem[], gridConfig: any) => {
+    // Styling
     const borderStyle: Partial<ExcelJS.Borders> = { top: { style: 'thin' }, left: { style: 'thin' }, bottom: { style: 'thin' }, right: { style: 'thin' } };
     const centerStyle: Partial<ExcelJS.Alignment> = { horizontal: 'center', vertical: 'middle', wrapText: true };
 
-    // Body Rows
-    for (const displayPeriod of gridConfig.rows) {
-       const row = worksheet.addRow(['', displayPeriod]);
-       row.height = 60;
-       
-       const periodCell = row.getCell(2);
-       periodCell.font = { bold: true };
-       periodCell.alignment = centerStyle;
-       periodCell.border = borderStyle;
+    // 1. Title Row
+    const title = `LỊCH HỌC CỦA LỚP ${cls.name} TỪ NGÀY ${format(weekStart, 'dd/MM')} ĐẾN NGÀY ${format(addDays(weekStart, 6), 'dd/MM')}`.toUpperCase();
+    const titleRow = worksheet.getRow(startRow);
+    titleRow.values = [title];
+    titleRow.font = { name: 'Arial', size: 14, bold: true };
+    titleRow.alignment = centerStyle;
+    titleRow.height = 30;
+    
+    const colCount = 2 + gridConfig.columns.length;
+    try {
+        worksheet.mergeCells(startRow, 1, startRow, colCount);
+    } catch(e) {}
 
-       const sessionCell = row.getCell(1);
-       sessionCell.border = borderStyle;
+    // 2. Header Row
+    const headerRowIdx = startRow + 1;
+    const headerLabels = gridConfig.columns.map((col: any) => `${col.label} - ${col.subLabel}`.toUpperCase());
+    const headerRow = worksheet.getRow(headerRowIdx);
+    headerRow.values = ['Buổi', 'Tiết', ...headerLabels];
+    headerRow.font = { name: 'Arial', size: 10, bold: true };
+    headerRow.alignment = centerStyle;
+    headerRow.height = 30;
+    
+    // Borders for header
+    for(let c=1; c<=colCount; c++) {
+        const cell = headerRow.getCell(c);
+        cell.border = borderStyle;
+        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFFFFF' } };
     }
 
-    // Merge Session Column based on grid type
+    // 3. Body Rows
+    const bodyStartRow = headerRowIdx + 1;
+    for (let i = 0; i < gridConfig.rows.length; i++) {
+        const displayPeriod = gridConfig.rows[i];
+        const currentRowIdx = bodyStartRow + i;
+        const row = worksheet.getRow(currentRowIdx);
+        row.values = ['', displayPeriod]; // Col 1 empty for Session merge, Col 2 Period
+        row.height = 60;
+        
+        const periodCell = row.getCell(2);
+        periodCell.font = { bold: true };
+        periodCell.alignment = centerStyle;
+        periodCell.border = borderStyle;
+        
+        const sessionCell = row.getCell(1);
+        sessionCell.border = borderStyle;
+    }
+
+    // 4. Merge Session Column (Col 1)
     if (gridConfig.type === 'standard') {
-        worksheet.mergeCells('A3:A7');
-        const morningCell = worksheet.getCell('A3');
+        // Morning: rows 0-4 (5 rows) -> bodyStartRow to bodyStartRow+4
+        worksheet.mergeCells(bodyStartRow, 1, bodyStartRow + 4, 1);
+        const morningCell = worksheet.getCell(bodyStartRow, 1);
         morningCell.value = 'SÁNG';
         morningCell.alignment = { ...centerStyle, textRotation: 90 };
         morningCell.font = { bold: true, size: 12 };
-        
-        worksheet.mergeCells('A8:A12');
-        const afternoonCell = worksheet.getCell('A8');
+
+        // Afternoon: rows 5-9 -> bodyStartRow+5 to bodyStartRow+9
+        worksheet.mergeCells(bodyStartRow + 5, 1, bodyStartRow + 9, 1);
+        const afternoonCell = worksheet.getCell(bodyStartRow + 5, 1);
         afternoonCell.value = 'CHIỀU';
         afternoonCell.alignment = { ...centerStyle, textRotation: 90 };
         afternoonCell.font = { bold: true, size: 12 };
     } else {
+        // Evening: All rows
         const totalRows = gridConfig.rows.length;
-        worksheet.mergeCells(`A3:A${3 + totalRows - 1}`);
-        const sessionCell = worksheet.getCell('A3');
+        worksheet.mergeCells(bodyStartRow, 1, bodyStartRow + totalRows - 1, 1);
+        const sessionCell = worksheet.getCell(bodyStartRow, 1);
         sessionCell.value = 'TỐI';
         sessionCell.alignment = { ...centerStyle, textRotation: 90 };
         sessionCell.font = { bold: true, size: 12 };
     }
 
-    // Data Fill
+    // 5. Data Fill
     for (let colIdx = 0; colIdx < gridConfig.columns.length; colIdx++) {
         const colDef = gridConfig.columns[colIdx];
         const dateStr = format(colDef.date, 'yyyy-MM-dd');
@@ -823,28 +954,29 @@ const ScheduleManager: React.FC = () => {
             const displayPeriod = gridConfig.rows[rowIdx];
             const realPeriod = colDef.periodOffset + displayPeriod;
             
-            const rowIndex = rowIdx + 3;
+            const rowIndex = bodyStartRow + rowIdx;
             const cell = worksheet.getCell(rowIndex, excelColIdx);
             cell.border = borderStyle;
-            cell.alignment = { vertical: 'middle', wrapText: true, horizontal: 'left' }; 
+            cell.alignment = { vertical: 'middle', wrapText: true, horizontal: 'left' };
 
             if (holiday) {
-                cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFEEEEEE' } }; 
-                if (rowIdx === 0) { 
-                    cell.value = `NGHỈ: ${holiday.name.toUpperCase()}`;
-                    cell.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
-                    cell.font = { bold: true, color: { argb: 'FF888888' } };
-                }
-                continue;
+                 cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFEEEEEE' } }; 
+                 // Only write text in the first row of the holiday block for this table
+                 if (rowIdx === 0) {
+                     cell.value = `NGHỈ: ${holiday.name.toUpperCase()}`;
+                     cell.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
+                     cell.font = { bold: true, color: { argb: 'FF888888' } };
+                 }
+                 continue;
             }
 
-            const item = filteredSchedules.find(s => s.date === dateStr && s.startPeriod === realPeriod);
+            const item = clsSchedules.find(s => s.date === dateStr && s.startPeriod === realPeriod);
             
             if (item) {
                 const subj = subjects.find(s => s.id === item.subjectId);
                 const tea = teachers.find(t => t.id === item.teacherId);
                 
-                const effectiveTotal = subj ? getEffectiveTotalPeriods(subj, currentClass) : 0;
+                const effectiveTotal = subj ? getEffectiveTotalPeriods(subj, cls) : 0;
                 const seqInfo = getSessionSequenceInfo(item, schedules, effectiveTotal);
                 const displayCumulative = Math.min(seqInfo.cumulative, effectiveTotal || seqInfo.cumulative);
 
@@ -880,18 +1012,18 @@ const ScheduleManager: React.FC = () => {
 
                 if (item.periodCount > 1) {
                     const endRowIdx = rowIndex + item.periodCount - 1;
-                    // Check bounds (Safe check)
-                    if (endRowIdx <= 2 + gridConfig.rows.length) {
-                         worksheet.mergeCells(rowIndex, excelColIdx, endRowIdx, excelColIdx);
+                    if (endRowIdx <= bodyStartRow + gridConfig.rows.length - 1) {
+                         try {
+                            worksheet.mergeCells(rowIndex, excelColIdx, endRowIdx, excelColIdx);
+                         } catch (e) {}
                     }
                 }
             }
         }
     }
 
-    const buffer = await workbook.xlsx.writeBuffer();
-    const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
-    saveAs(blob, `Lich_Hoc_${currentClass.name}_Tuan_${weekNumber}.xlsx`);
+    // Return next start row (Current Start + Title(1) + Header(1) + DataRows + Spacing(2))
+    return startRow + 1 + 1 + gridConfig.rows.length + 2;
   };
 
   const handleExportInvitation = (item: any) => {
@@ -1012,24 +1144,32 @@ const ScheduleManager: React.FC = () => {
           <button onClick={handleNextWeek} className="p-2 hover:bg-gray-100 rounded-full"><ChevronRight /></button>
         </div>
 
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2 justify-end">
             <button 
                 onClick={handleContinueNextWeek}
                 className="flex items-center gap-2 px-3 py-2 bg-purple-600 text-white rounded hover:bg-purple-700 text-sm font-medium"
             >
-                <CalendarIcon size={16} /> Tiếp tục lịch tuần sau
+                <CalendarIcon size={16} /> <span className="hidden sm:inline">Tiếp tục lịch</span>
             </button>
             <button 
                 onClick={handleExportExcel}
                 className="flex items-center gap-2 px-3 py-2 bg-green-600 text-white rounded hover:bg-green-700 text-sm font-medium"
+                title="Xuất file lịch của lớp đang chọn"
             >
-                <Download size={16} /> Xuất file lịch học
+                <Download size={16} /> <span className="hidden sm:inline">Xuất lịch lớp</span>
+            </button>
+            <button 
+                onClick={handleExportAllClassesExcel}
+                className="flex items-center gap-2 px-3 py-2 bg-green-700 text-white rounded hover:bg-green-800 text-sm font-medium border border-green-800 shadow-sm"
+                title="Xuất file lịch của tất cả các lớp trong tuần này (Mỗi lớp 1 Sheet)"
+            >
+                <FileSpreadsheet size={16} /> <span className="hidden sm:inline">Xuất lịch toàn trường</span>
             </button>
             <button 
                 onClick={() => { resetForm(); setShowAddModal(true); }}
                 className="flex items-center gap-2 px-3 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 text-sm font-medium"
             >
-                <Plus size={16} /> Thêm lịch
+                <Plus size={16} /> <span className="hidden sm:inline">Thêm lịch</span>
             </button>
         </div>
       </div>
