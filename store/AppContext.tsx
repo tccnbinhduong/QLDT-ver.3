@@ -12,7 +12,7 @@ interface AppContextType extends AppState {
   updateSubject: (id: string, s: Partial<Subject>) => void;
   deleteSubject: (id: string) => void;
   importSubjects: (subjects: Omit<Subject, 'id'>[]) => void;
-  addSchedule: (s: Omit<ScheduleItem, 'id' | 'status'>) => void;
+  addSchedule: (s: Omit<ScheduleItem, 'id'>) => void; // Updated signature
   updateSchedule: (id: string, s: Partial<ScheduleItem>) => void;
   deleteSchedule: (id: string) => void;
   addClass: (c: Omit<ClassEntity, 'id'>) => void;
@@ -257,9 +257,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       }));
   }
 
-  const addSchedule = (s: Omit<ScheduleItem, 'id' | 'status'>) => {
+  const addSchedule = (s: Omit<ScheduleItem, 'id'>) => {
     saveStateForUndo();
-    const newItem: ScheduleItem = { ...s, id: generateId(), status: ScheduleStatus.PENDING };
+    const newItem: ScheduleItem = { ...s, id: generateId(), status: s.status || ScheduleStatus.PENDING };
     setState(prev => ({ ...prev, schedules: [...prev.schedules, newItem] }));
   };
 

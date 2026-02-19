@@ -4,7 +4,7 @@ import { useApp } from '../store/AppContext';
 import { checkConflict, calculateSubjectProgress, getSessionFromPeriod, parseLocal, determineStatus, getSessionSequenceInfo, generateId, base64ToArrayBuffer, getEffectiveTotalPeriods, isSubjectFinished, getCampusId } from '../utils';
 import { ScheduleItem, ScheduleStatus, Teacher } from '../types';
 import { format, addDays, isSameDay, getWeek } from 'date-fns';
-import { vi } from 'date-fns/locale/vi';
+import { vi } from 'date-fns/locale';
 import { Calendar as CalendarIcon, Plus, ChevronRight, ChevronLeft, AlertCircle, Save, Trash2, ListFilter, X, Copy, Clipboard, Users, Download, BookOpen, Mail, CalendarOff, Sun, Moon, FileSpreadsheet } from 'lucide-react';
 import ExcelJS from 'exceljs';
 import PizZip from 'pizzip';
@@ -82,6 +82,7 @@ const ScheduleManager: React.FC = () => {
   const [formDate, setFormDate] = useState(format(new Date(), 'yyyy-MM-dd'));
   const [formStartPeriod, setFormStartPeriod] = useState(1);
   const [formPeriodCount, setFormPeriodCount] = useState(3);
+  const [formStatus, setFormStatus] = useState<ScheduleStatus>(ScheduleStatus.PENDING); // New State
   const [formError, setFormError] = useState('');
   const [formNote, setFormNote] = useState(''); 
 
@@ -362,6 +363,7 @@ const ScheduleManager: React.FC = () => {
     setFormDate(format(new Date(), 'yyyy-MM-dd'));
     setFormStartPeriod(selectedSession === 'Tối' ? 11 : 1);
     setFormPeriodCount(3);
+    setFormStatus(ScheduleStatus.PENDING); // Reset status
     setFormError('');
     setFormNote('');
     setEditItem(null);
@@ -437,6 +439,7 @@ const ScheduleManager: React.FC = () => {
             startPeriod: realTargetPeriod,
             periodCount: sourceItem.periodCount,
             group: sourceItem.group,
+            status: sourceItem.status // Maintain status (including MAKEUP)
         };
 
         const conflict = checkConflict(newItem, schedules, subjects, classes); 
@@ -540,14 +543,18 @@ const ScheduleManager: React.FC = () => {
   }
 
   const handleStatusChange = (newStatus: ScheduleStatus) => {
-    if (!editItem) return;
-    const originalItem = schedules.find(s => s.id === editItem.id);
-    if (!originalItem) return;
-    const relatedItems = getRelatedSharedItems(originalItem);
-    relatedItems.forEach(item => {
-        updateSchedule(item.id, { status: newStatus });
-    });
-    setEditItem({ ...editItem, status: newStatus });
+    if (editItem) {
+        const originalItem = schedules.find(s => s.id === editItem.id);
+        if (originalItem) {
+             const relatedItems = getRelatedSharedItems(originalItem);
+             relatedItems.forEach(item => {
+                updateSchedule(item.id, { status: newStatus });
+             });
+        }
+        setEditItem({ ...editItem, status: newStatus });
+    } else {
+        setFormStatus(newStatus);
+    }
   };
 
   const handleSaveSchedule = () => {
@@ -561,6 +568,7 @@ const ScheduleManager: React.FC = () => {
     const startPeriod = editItem ? editItem.startPeriod : formStartPeriod;
     const periodCount = editItem ? editItem.periodCount : formPeriodCount;
     const note = editItem ? editItem.note : formNote;
+    const status = editItem ? editItem.status : formStatus; // Use current status
 
     if (!teacherId || !subjectId || !roomId || !classId) {
       setFormError('Vui lòng điền đầy đủ thông tin');
@@ -585,6 +593,7 @@ const ScheduleManager: React.FC = () => {
       startPeriod,
       periodCount,
       note,
+      status, // Include status in save
     };
 
     if (editItem) {
@@ -1613,7 +1622,14 @@ const ScheduleManager: React.FC = () => {
                                 return true;
                             }
 
-                            // 4. Specific Major: Only include classes with same major
+                            // 4. Special Case: Electrical Majors (2 & 3) can study together if shared
+                            // 2: Điện công nghiệp, 3: Điện - điện tử
+                            const electricalMajors = ['2', '3'];
+                            if (electricalMajors.includes(currentFormSubject.majorId)) {
+                                return electricalMajors.includes(cls.majorId);
+                            }
+
+                            // 5. Specific Major: Only include classes with same major
                             return cls.majorId === currentFormSubject.majorId;
                         }).map(cls => (
                             <label key={cls.id} className={`flex items-center space-x-2 text-sm p-2 rounded cursor-pointer ${selectedSharedClasses.includes(cls.id) ? 'bg-blue-100' : 'hover:bg-white'}`}>
@@ -1706,8 +1722,33 @@ const ScheduleManager: React.FC = () => {
 
                                     const remaining = Math.max(0, effectiveTotal - used);
                                     if (val > remaining) {
-                                        alert(`Môn học chỉ còn ${remaining} tiết`);
-                                        val = remaining;
+                                        // CHECK IF USER WANTS TO MAKE IT A MAKEUP SESSION
+                                        const currentStatus = editItem ? editItem.status : formStatus;
+                                        if (currentStatus !== ScheduleStatus.MAKEUP) {
+                                            if (window.confirm(`Môn học chỉ còn ${remaining} tiết trong kế hoạch.\nBạn có muốn xếp ${val} tiết này là "Tiết bổ sung" (Ôn tập/Dạy bù) không?`)) {
+                                                // User agreed to add as MAKEUP
+                                                if (editItem) {
+                                                    // For edit mode, we trigger the status change (which handles related items if shared)
+                                                    // But we also need to update local state so the input reflects the change immediately
+                                                    const updatedItem = { ...editItem, status: ScheduleStatus.MAKEUP };
+                                                    // We must update the DB for related items too, similar to handleStatusChange
+                                                    const originalItem = schedules.find(s => s.id === editItem.id);
+                                                    if (originalItem) {
+                                                         const relatedItems = getRelatedSharedItems(originalItem);
+                                                         relatedItems.forEach(item => {
+                                                            updateSchedule(item.id, { status: ScheduleStatus.MAKEUP });
+                                                         });
+                                                    }
+                                                    setEditItem(updatedItem);
+                                                } else {
+                                                    setFormStatus(ScheduleStatus.MAKEUP);
+                                                }
+                                                // Allow the value
+                                            } else {
+                                                // User denied, restrict value
+                                                val = remaining;
+                                            }
+                                        }
                                     }
                                 }
                             }
@@ -1751,25 +1792,27 @@ const ScheduleManager: React.FC = () => {
                 />
               </div>
 
-              {editItem && (
-                  <div className="bg-yellow-50 p-3 rounded border border-yellow-200">
-                      <label className="block text-sm font-bold mb-2 text-yellow-800">Trạng thái & Điều chỉnh</label>
-                      <div className="flex flex-wrap gap-2">
-                          {Object.values(ScheduleStatus).map(status => (
+              <div className="bg-yellow-50 p-3 rounded border border-yellow-200">
+                  <label className="block text-sm font-bold mb-2 text-yellow-800">Trạng thái & Điều chỉnh</label>
+                  <div className="flex flex-wrap gap-2">
+                      {Object.values(ScheduleStatus).map(status => {
+                          const currentStatus = editItem ? editItem.status : formStatus;
+                          return (
                               <button 
                                 key={status}
                                 onClick={() => handleStatusChange(status)}
-                                className={`px-2 py-1 rounded text-xs border ${editItem.status === status ? 'bg-yellow-500 text-white border-yellow-600' : 'bg-white text-gray-700 hover:bg-gray-100'}`}
+                                className={`px-2 py-1 rounded text-xs border ${currentStatus === status ? 'bg-yellow-500 text-white border-yellow-600' : 'bg-white text-gray-700 hover:bg-gray-100'}`}
                               >
                                   {status}
                               </button>
-                          ))}
-                      </div>
-                      <p className="text-xs text-gray-500 mt-2">
-                          *Chọn "Nghỉ" để đánh dấu buổi nghỉ. Chọn "Tiết bổ sung" cho lịch bù.
-                      </p>
+                          );
+                      })}
                   </div>
-              )}
+                  <p className="text-xs text-gray-500 mt-2">
+                      *Chọn "Nghỉ" để đánh dấu buổi nghỉ. Chọn "Tiết bổ sung" cho lịch bù.
+                  </p>
+              </div>
+
             </div>
 
             <div className="p-4 border-t bg-gray-50 flex justify-between shrink-0">
