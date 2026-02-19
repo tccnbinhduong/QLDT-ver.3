@@ -3,7 +3,7 @@ import React, { useMemo, useState } from 'react';
 import { useApp } from '../store/AppContext';
 import { ScheduleStatus, ScheduleItem } from '../types';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
-import *as XLSX from 'xlsx';
+import XLSX from 'xlsx';
 import { Download, AlertCircle, X, User, BookOpen, Layers } from 'lucide-react';
 import { format } from 'date-fns';
 import { parseLocal, isSubjectFinished, getEffectiveTotalPeriods } from '../utils';
@@ -189,14 +189,17 @@ const Statistics: React.FC = () => {
             }
             
             // Only show subjects that are "currently learning"
-            if (learned > 0 && remaining > 0) {
+            // For culture_8, show even if remaining <= 0 (since they have no limit)
+            const isCulture8 = sub.majorId === 'culture_8';
+            
+            if (learned > 0 && (remaining > 0 || isCulture8)) {
                  rawStats.push({
                      id: sub.id,
                      name: sub.name,
                      className: cls.name,
-                     total: effectiveTotal,
+                     total: isCulture8 ? 0 : effectiveTotal, // 0 indicates no limit for Culture 8
                      learned: learned,
-                     remaining: remaining,
+                     remaining: isCulture8 ? 0 : remaining, // No remaining bar for Culture 8
                      isShared: sub.isShared,
                      signature: signature // NEW: Add signature for grouping
                  });

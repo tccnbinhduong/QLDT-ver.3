@@ -183,14 +183,24 @@ const TeachingProgress: React.FC = () => {
       }
 
       // --- CULTURE 8 EXCEPTION ---
-      // For 'culture_8' subjects, we do NOT calculate progress and force status to 'upcoming'
+      // For 'culture_8' subjects: Count taught periods but ignore total limit
       if (sub.majorId === 'culture_8') {
+          const learned = classSchedules.reduce((acc, curr) => {
+               const sDate = parseLocal(curr.date);
+               // Count if date is today or past
+               if (sDate <= today) return acc + curr.periodCount;
+               return acc;
+          }, 0);
+
+          const hasActivity = learned > 0;
+
           return {
               ...sub,
-              learnedPeriods: 0,
+              learnedPeriods: learned,
+              totalPeriods: 0, // Indicator for no limit
               groupBreakdown: [],
               percentage: 0,
-              status: 'upcoming', // Always Upcoming/Sắp học
+              status: hasActivity ? 'in-progress' : 'upcoming', 
               startDate,
               endDate,
               examDate,
@@ -409,39 +419,50 @@ const TeachingProgress: React.FC = () => {
 
                      {/* Column 3: Progress Bar (3 cols) */}
                      <div className="md:col-span-3 w-full px-2">
-                        {/* Check if we have group breakdown */}
-                        {subject.groupBreakdown && subject.groupBreakdown.length > 0 ? (
-                            <div className="space-y-2">
-                                <div className="text-[10px] font-bold text-blue-600 uppercase flex items-center mb-1">
-                                    <Users size={10} className="mr-1" /> Tiến độ theo nhóm
-                                </div>
-                                {subject.groupBreakdown.map(gb => (
-                                    <div key={gb.name}>
-                                        <div className="flex justify-between text-[10px] mb-0.5">
-                                            <span className="font-semibold text-gray-600">{gb.name}</span>
-                                            <span className="text-gray-500">{gb.learned}/{subject.totalPeriods} ({gb.percentage}%)</span>
-                                        </div>
-                                        <div className="w-full bg-gray-200 rounded-full h-1.5">
-                                            <div className={`h-1.5 rounded-full ${getProgressBarColor(subject.status)}`} style={{width: `${gb.percentage}%`}}></div>
-                                        </div>
-                                    </div>
-                                ))}
-                            </div>
+                        {/* Check if Culture 8 - Special Display */}
+                        {subject.majorId === 'culture_8' ? (
+                             <div className="flex justify-between text-xs mb-1.5 font-medium items-center p-2 bg-blue-50 rounded border border-blue-100">
+                                <span className="text-blue-700 font-bold">Đã dạy: {subject.learnedPeriods} tiết</span>
+                                <span className="text-xs text-gray-400 italic font-normal">Không tính tổng</span>
+                             </div>
                         ) : (
-                            // Standard Single Bar
+                            /* Standard Display */
                             <>
-                                <div className="flex justify-between text-xs mb-1.5 font-medium">
-                                    <span className="text-gray-600">{subject.learnedPeriods} / {subject.totalPeriods} tiết</span>
-                                    <span className={`${subject.status === 'completed' ? 'text-green-600' : subject.status === 'in-progress' ? 'text-blue-600' : 'text-gray-400'}`}>
-                                        {subject.percentage}%
-                                    </span>
-                                </div>
-                                <div className="w-full bg-gray-200 rounded-full h-2.5">
-                                    <div 
-                                        className={`h-2.5 rounded-full transition-all duration-500 ${getProgressBarColor(subject.status)}`} 
-                                        style={{ width: `${subject.percentage}%` }}
-                                    ></div>
-                                </div>
+                                {/* Check if we have group breakdown */}
+                                {subject.groupBreakdown && subject.groupBreakdown.length > 0 ? (
+                                    <div className="space-y-2">
+                                        <div className="text-[10px] font-bold text-blue-600 uppercase flex items-center mb-1">
+                                            <Users size={10} className="mr-1" /> Tiến độ theo nhóm
+                                        </div>
+                                        {subject.groupBreakdown.map(gb => (
+                                            <div key={gb.name}>
+                                                <div className="flex justify-between text-[10px] mb-0.5">
+                                                    <span className="font-semibold text-gray-600">{gb.name}</span>
+                                                    <span className="text-gray-500">{gb.learned}/{subject.totalPeriods} ({gb.percentage}%)</span>
+                                                </div>
+                                                <div className="w-full bg-gray-200 rounded-full h-1.5">
+                                                    <div className={`h-1.5 rounded-full ${getProgressBarColor(subject.status)}`} style={{width: `${gb.percentage}%`}}></div>
+                                                </div>
+                                            </div>
+                                        ))}
+                                    </div>
+                                ) : (
+                                    // Standard Single Bar
+                                    <>
+                                        <div className="flex justify-between text-xs mb-1.5 font-medium">
+                                            <span className="text-gray-600">{subject.learnedPeriods} / {subject.totalPeriods} tiết</span>
+                                            <span className={`${subject.status === 'completed' ? 'text-green-600' : subject.status === 'in-progress' ? 'text-blue-600' : 'text-gray-400'}`}>
+                                                {subject.percentage}%
+                                            </span>
+                                        </div>
+                                        <div className="w-full bg-gray-200 rounded-full h-2.5">
+                                            <div 
+                                                className={`h-2.5 rounded-full transition-all duration-500 ${getProgressBarColor(subject.status)}`} 
+                                                style={{ width: `${subject.percentage}%` }}
+                                            ></div>
+                                        </div>
+                                    </>
+                                )}
                             </>
                         )}
                      </div>
