@@ -652,15 +652,25 @@ const ScheduleManager: React.FC = () => {
   };
 
   const handleContinueNextWeek = () => {
+    // Determine the date range of the current week based on weekStart (Monday)
+    const sStart = new Date(weekStart.getFullYear(), weekStart.getMonth(), weekStart.getDate());
+    const sEnd = addDays(sStart, 6); // Sunday of the same week
+
     const currentWeekSchedules = filteredSchedules.filter(s => {
        const d = parseLocal(s.date);
-       return d >= weekStart && d < addDays(weekStart, 7); 
+       const dateOnly = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+       return dateOnly >= sStart && dateOnly <= sEnd; 
     }).sort((a, b) => {
         const da = parseLocal(a.date).getTime();
         const db = parseLocal(b.date).getTime();
         if (da !== db) return da - db;
         return a.startPeriod - b.startPeriod;
     });
+
+    if (currentWeekSchedules.length === 0) {
+      alert("Không có buổi học nào trong tuần này để sao chép.");
+      return;
+    }
 
     let addedCount = 0;
     let warnings: string[] = [];
