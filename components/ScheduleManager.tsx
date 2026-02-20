@@ -722,7 +722,7 @@ const ScheduleManager: React.FC = () => {
             const exists = schedules.some(s => s.classId === sourceItem.classId && s.date === newDateStr && s.startPeriod === sourceItem.startPeriod);
 
             if (!exists) {
-              const periodsToTeach = Math.min(sourceItem.periodCount, currentRemaining);
+              const periodsToTeach = isCulture8 ? sourceItem.periodCount : Math.min(sourceItem.periodCount, currentRemaining);
               const newItem = {
                 ...sourceItem,
                 date: newDateStr,
