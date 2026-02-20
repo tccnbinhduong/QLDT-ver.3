@@ -686,6 +686,7 @@ const ScheduleManager: React.FC = () => {
       let itemsToProcess = [item];
 
       const isShared = subject.isShared || (subject.majorId !== 'common' && subject.majorId !== 'culture' && subject.majorId !== 'culture_8');
+      const isCulture8 = subject.majorId === 'culture_8';
 
       if (isShared) {
           if (processedSharedKeys.has(slotKey)) return; 
@@ -706,7 +707,7 @@ const ScheduleManager: React.FC = () => {
           const progress = calculateSubjectProgress(sourceItem.subjectId, sourceItem.classId, effectiveTotal, schedules, sourceItem.group);
           const currentRemaining = progress.remaining - previouslyAdded;
           
-          if (currentRemaining > 0) {
+          if (currentRemaining > 0 || isCulture8) {
             const nextDate = addDays(parseLocal(sourceItem.date), 7);
             const newDateStr = format(nextDate, 'yyyy-MM-dd');
             
