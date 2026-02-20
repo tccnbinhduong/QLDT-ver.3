@@ -29,7 +29,7 @@ const SystemManager: React.FC = () => {
       };
 
       const backupPackage = {
-          version: "1.1",
+          version: "1.2",
           type: "full_backup",
           timestamp: new Date().toISOString(),
           data: coreData,
@@ -37,6 +37,17 @@ const SystemManager: React.FC = () => {
       };
 
       const json = JSON.stringify(backupPackage, null, 2);
+      
+      // Desktop compatibility check
+      if (window.hasOwnProperty('electronAPI')) {
+        (window as any).electronAPI.downloadFile({
+          content: json,
+          filename: `EduPro_FullBackup_${format(new Date(), 'dd-MM-yyyy')}.json`,
+          type: 'application/json'
+        });
+        return;
+      }
+
       const blob = new Blob([json], { type: 'application/json' });
       const url = URL.createObjectURL(blob);
       const link = document.createElement('a');
@@ -214,6 +225,26 @@ Cách dùng: Copy các biến bên dưới (bao gồm cả dấu ngoặc nhọn)
    - Nếu tên lớp kết thúc bằng '1' -> Cơ sở 1 (Bình Hoà, TP.HCM)
    - Nếu tên lớp kết thúc bằng '2' -> Cơ sở 2 (Tân Đông Hiệp, TP.HCM)
 `;
+      }
+
+      // Desktop compatibility check
+      if (window.hasOwnProperty('electronAPI')) {
+        (window as any).electronAPI.downloadFile({
+          content: content,
+          filename: filename,
+          type: 'text/plain;charset=utf-8'
+        });
+        return;
+      }
+
+      // Desktop compatibility check
+      if (window.hasOwnProperty('electronAPI')) {
+        (window as any).electronAPI.downloadFile({
+          content: content,
+          filename: filename,
+          type: 'text/plain;charset=utf-8'
+        });
+        return;
       }
 
       const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });

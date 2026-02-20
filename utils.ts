@@ -2,7 +2,9 @@
 import { ScheduleItem, ScheduleStatus, Subject, ClassEntity } from './types';
 import { isSameDay } from 'date-fns';
 
-export const generateId = () => Math.random().toString(36).substr(2, 9);
+export const generateId = () => {
+  return Math.random().toString(36).substring(2, 9) + Date.now().toString(36);
+};
 
 export const getSessionFromPeriod = (startPeriod: number): 'Sáng' | 'Chiều' | 'Tối' => {
   if (startPeriod <= 5) return 'Sáng';

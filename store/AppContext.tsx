@@ -119,12 +119,23 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   useEffect(() => {
     try {
-      localStorage.setItem('eduScheduleData', JSON.stringify(state));
+      const dataToSave = JSON.stringify(state);
+      localStorage.setItem('eduScheduleData', dataToSave);
+      
+      // Desktop compatibility: Also try to save to file if in Electron environment
+      if (window.hasOwnProperty('electronAPI')) {
+        (window as any).electronAPI.saveData(dataToSave);
+      }
     } catch (error) {
       console.error("Storage Limit Exceeded", error);
-      alert("Cảnh báo: Bộ nhớ trình duyệt đã đầy! Dữ liệu mới chưa được lưu. Vui lòng xóa bớt tài liệu hoặc sao lưu và reset hệ thống.");
+      // alert("Cảnh báo: Bộ nhớ trình duyệt đã đầy! Dữ liệu mới chưa được lưu. Vui lòng xóa bớt tài liệu hoặc sao lưu và reset hệ thống.");
     }
   }, [state]);
+
+  // NEW: Robust error handling for ID generation
+  const safeGenerateId = () => {
+    return Math.random().toString(36).substring(2, 9) + Date.now().toString(36);
+  };
 
   // Helper to save state before modification
   const saveStateForUndo = () => {
@@ -167,7 +178,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const addTeacher = (t: Omit<Teacher, 'id'>) => {
     saveStateForUndo();
-    setState(prev => ({ ...prev, teachers: [...prev.teachers, { ...t, id: generateId() }] }));
+    setState(prev => ({ ...prev, teachers: [...prev.teachers, { ...t, id: safeGenerateId() }] }));
   };
   const updateTeacher = (id: string, t: Partial<Teacher>) => {
     saveStateForUndo();
@@ -184,13 +195,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       saveStateForUndo();
       setState(prev => ({
           ...prev,
-          teachers: [...prev.teachers, ...newTeachers.map(t => ({...t, id: generateId()}))]
+          teachers: [...prev.teachers, ...newTeachers.map(t => ({...t, id: safeGenerateId()}))]
       }));
   }
 
   const addSubject = (s: Omit<Subject, 'id'>) => {
     saveStateForUndo();
-    setState(prev => ({ ...prev, subjects: [...prev.subjects, { ...s, id: generateId() }] }));
+    setState(prev => ({ ...prev, subjects: [...prev.subjects, { ...s, id: safeGenerateId() }] }));
   };
   const updateSubject = (id: string, s: Partial<Subject>) => {
     saveStateForUndo();
@@ -207,13 +218,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       saveStateForUndo();
       setState(prev => ({
           ...prev,
-          subjects: [...prev.subjects, ...newSubjects.map(s => ({...s, id: generateId()}))]
+          subjects: [...prev.subjects, ...newSubjects.map(s => ({...s, id: safeGenerateId()}))]
       }));
   }
 
   const addClass = (c: Omit<ClassEntity, 'id'>) => {
     saveStateForUndo();
-    setState(prev => ({ ...prev, classes: [...prev.classes, { ...c, id: generateId() }] }));
+    setState(prev => ({ ...prev, classes: [...prev.classes, { ...c, id: safeGenerateId() }] }));
   };
   const updateClass = (id: string, c: Partial<ClassEntity>) => {
     saveStateForUndo();
@@ -230,13 +241,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       saveStateForUndo();
       setState(prev => ({
           ...prev,
-          classes: [...prev.classes, ...newClasses.map(c => ({...c, id: generateId()}))]
+          classes: [...prev.classes, ...newClasses.map(c => ({...c, id: safeGenerateId()}))]
       }));
   }
 
   const addStudent = (s: Omit<Student, 'id'>) => {
     saveStateForUndo();
-    setState(prev => ({ ...prev, students: [...prev.students, { ...s, id: generateId() }] }));
+    setState(prev => ({ ...prev, students: [...prev.students, { ...s, id: safeGenerateId() }] }));
   };
   const updateStudent = (id: string, s: Partial<Student>) => {
      saveStateForUndo();
@@ -253,13 +264,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       saveStateForUndo();
       setState(prev => ({
           ...prev,
-          students: [...prev.students, ...newStudents.map(s => ({...s, id: generateId()}))]
+          students: [...prev.students, ...newStudents.map(s => ({...s, id: safeGenerateId()}))]
       }));
   }
 
   const addSchedule = (s: Omit<ScheduleItem, 'id'>) => {
     saveStateForUndo();
-    const newItem: ScheduleItem = { ...s, id: generateId(), status: s.status || ScheduleStatus.PENDING };
+    const newItem: ScheduleItem = { ...s, id: safeGenerateId(), status: s.status || ScheduleStatus.PENDING };
     setState(prev => ({ ...prev, schedules: [...prev.schedules, newItem] }));
   };
 
@@ -279,7 +290,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   // Document actions
   const addDocument = (d: Omit<DocumentItem, 'id'>) => {
     saveStateForUndo();
-    setState(prev => ({ ...prev, documents: [...prev.documents, { ...d, id: generateId() }] }));
+    setState(prev => ({ ...prev, documents: [...prev.documents, { ...d, id: safeGenerateId() }] }));
   };
 
   const deleteDocument = (id: string) => {
@@ -290,7 +301,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   // Template actions
   const addTemplate = (t: Omit<ExportTemplate, 'id'>) => {
     saveStateForUndo();
-    setState(prev => ({ ...prev, templates: [...prev.templates, { ...t, id: generateId() }] }));
+    setState(prev => ({ ...prev, templates: [...prev.templates, { ...t, id: safeGenerateId() }] }));
   };
   
   const deleteTemplate = (id: string) => {
@@ -301,7 +312,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   // Holiday actions
   const addHoliday = (h: Omit<Holiday, 'id'>) => {
     saveStateForUndo();
-    setState(prev => ({ ...prev, holidays: [...prev.holidays, { ...h, id: generateId() }] }));
+    setState(prev => ({ ...prev, holidays: [...prev.holidays, { ...h, id: safeGenerateId() }] }));
   };
 
   const updateHoliday = (id: string, h: Partial<Holiday>) => {
