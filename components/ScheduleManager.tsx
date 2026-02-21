@@ -315,12 +315,17 @@ const ScheduleManager: React.FC = () => {
   }, [currentFormSubject, classes, selectedClassId]);
 
   useEffect(() => {
-    if (showAddModal && !editItem) {
-        if (!selectedSharedClasses.includes(selectedClassId)) {
-            setSelectedSharedClasses([selectedClassId]);
+    if (showAddModal) {
+        if (editItem) {
+            const related = getRelatedSharedItems(editItem);
+            setSelectedSharedClasses(related.map(r => r.classId));
+        } else {
+            if (!selectedSharedClasses.includes(selectedClassId)) {
+                setSelectedSharedClasses([selectedClassId]);
+            }
         }
     }
-  }, [showAddModal, formSubjectId, selectedClassId]);
+  }, [showAddModal, formSubjectId, selectedClassId, editItem]);
 
   useEffect(() => {
       if (!currentFormSubject) return;
@@ -413,7 +418,7 @@ const ScheduleManager: React.FC = () => {
 
     const holiday = getHoliday(targetDate);
     if (holiday) {
-        alert(`Không thể xếp lịch vào ngày nghỉ: ${holiday.name}`);
+        alert(`Không thể di chuyển lịch vào ngày nghỉ: ${holiday.name}`);
         setDraggedItem(null);
         return;
     }
@@ -424,10 +429,11 @@ const ScheduleManager: React.FC = () => {
         return;
     }
 
-    const itemsToCopy = getRelatedSharedItems(draggedItem);
+    const itemsToMove = getRelatedSharedItems(draggedItem);
     let successCount = 0;
+    const itemsAdded: any[] = [];
 
-    itemsToCopy.forEach(sourceItem => {
+    itemsToMove.forEach(sourceItem => {
         const newItem = {
             type: sourceItem.type,
             teacherId: sourceItem.teacherId,
@@ -439,20 +445,23 @@ const ScheduleManager: React.FC = () => {
             startPeriod: realTargetPeriod,
             periodCount: sourceItem.periodCount,
             group: sourceItem.group,
-            status: sourceItem.status // Maintain status (including MAKEUP)
+            status: sourceItem.status,
+            note: sourceItem.note
         };
 
-        const conflict = checkConflict(newItem, schedules, subjects, classes); 
+        const conflict = checkConflict(newItem, schedules, subjects, classes, itemsToMove.map(i => i.id)); 
         if (!conflict.hasConflict) {
-            addSchedule(newItem);
+            itemsAdded.push(newItem);
             successCount++;
         }
     });
 
-    if (successCount === 0) {
-        alert(`Không thể sao chép (Trùng lịch).`);
-    } else if (itemsToCopy.length > 1 && successCount < itemsToCopy.length) {
-         alert(`Đã sao chép ${successCount}/${itemsToCopy.length} lớp (Một số lớp bị trùng lịch).`);
+    if (successCount === itemsToMove.length) {
+        // Move all: Delete old and add new
+        itemsToMove.forEach(item => deleteSchedule(item.id));
+        itemsAdded.forEach(item => addSchedule(item));
+    } else {
+        alert(`Không thể di chuyển (Trùng lịch hoặc lỗi logic).`);
     }
 
     setDraggedItem(null);
@@ -682,22 +691,17 @@ const ScheduleManager: React.FC = () => {
       const subject = subjects.find(s => s.id === item.subjectId);
       if (!subject) return;
 
-      const slotKey = `${item.date}-${item.startPeriod}-${item.teacherId}-${item.subjectId}`;
-      let itemsToProcess = [item];
-
       const isShared = subject.isShared || (subject.majorId !== 'common' && subject.majorId !== 'culture' && subject.majorId !== 'culture_8');
       const isCulture8 = subject.majorId === 'culture_8';
+      const slotKey = `${item.date}-${item.startPeriod}-${item.teacherId}-${item.subjectId}`;
 
-      if (isShared) {
-          if (processedSharedKeys.has(slotKey)) return; 
-          const sharedGroup = getRelatedSharedItems(item);
-          if (sharedGroup.length > 0) {
-              itemsToProcess = sharedGroup;
+          const itemsToProcess = isShared ? getRelatedSharedItems(item) : [item];
+          if (isShared) {
+              if (processedSharedKeys.has(slotKey)) return;
               processedSharedKeys.add(slotKey);
           }
-      }
 
-      itemsToProcess.forEach(sourceItem => {
+    itemsToProcess.forEach(sourceItem => {
           const key = `${sourceItem.subjectId}-${sourceItem.classId}-${sourceItem.group || 'common'}`;
           const previouslyAdded = addedPeriodsMap[key] || 0;
           
@@ -705,7 +709,7 @@ const ScheduleManager: React.FC = () => {
           const effectiveTotal = getEffectiveTotalPeriods(subject, itemClass);
 
           const progress = calculateSubjectProgress(sourceItem.subjectId, sourceItem.classId, effectiveTotal, schedules, sourceItem.group);
-          const currentRemaining = progress.remaining - previouslyAdded;
+          const currentRemaining = (effectiveTotal - progress.learned) - previouslyAdded;
           
           if (currentRemaining > 0 || isCulture8) {
             const nextDate = addDays(parseLocal(sourceItem.date), 7);
@@ -727,10 +731,9 @@ const ScheduleManager: React.FC = () => {
                 ...sourceItem,
                 date: newDateStr,
                 periodCount: periodsToTeach,
-                status: ScheduleStatus.PENDING,
-                id: generateId() 
+                status: ScheduleStatus.PENDING
               };
-              const { id, ...itemWithoutId } = newItem;
+              const { id, ...itemWithoutId } = newItem as any;
               const conflict = checkConflict(itemWithoutId as any, schedules, subjects, classes);
               if (!conflict.hasConflict) {
                 addSchedule(itemWithoutId as any);
@@ -740,7 +743,7 @@ const ScheduleManager: React.FC = () => {
             }
           }
           
-          const finalRemaining = progress.remaining - (addedPeriodsMap[key] || 0);
+          const finalRemaining = (effectiveTotal - progress.learned) - (addedPeriodsMap[key] || 0);
           const className = classes.find(c => c.id === sourceItem.classId)?.name;
           const groupLabel = sourceItem.group ? `(${sourceItem.group})` : '';
 
@@ -1321,7 +1324,20 @@ const ScheduleManager: React.FC = () => {
                          onDragStart={(e) => handleDragStart(e, item)}
                          onContextMenu={(e) => handleContextMenu(e, col.date, realStartPeriod, item)}
                        >
-                         <div className={`h-full w-full p-2 rounded text-xs ${bgColor} flex flex-col justify-between ${draggedItem?.id === item.id ? 'opacity-50' : ''}`}>
+                         <div className={`h-full w-full p-2 rounded text-xs ${bgColor} flex flex-col justify-between relative ${draggedItem?.id === item.id ? 'opacity-50' : ''}`}>
+                           <button 
+                             onClick={(e) => { 
+                               e.stopPropagation(); 
+                               if (window.confirm('Bạn có chắc chắn muốn xóa buổi học này?')) {
+                                 const related = getRelatedSharedItems(item);
+                                 related.forEach(r => deleteSchedule(r.id));
+                               }
+                             }}
+                             className="absolute -top-1 -right-1 opacity-0 group-hover:opacity-100 bg-red-500 text-white rounded-full p-0.5 hover:bg-red-600 transition-opacity shadow-sm z-10"
+                             title="Xóa nhanh"
+                           >
+                             <X size={10} />
+                           </button>
                            <div>
                              <div className="font-bold text-gray-800 text-sm mb-1">
                                 {subject?.name}
@@ -1591,73 +1607,48 @@ const ScheduleManager: React.FC = () => {
                 </select>
               </div>
 
-              {/* NEW: Multi-Select for Shared Subjects */}
-              {isFormSubjectShared && !editItem && (
+              {/* Shared Subjects Selection */}
+              {isFormSubjectShared && (
                   <div className="bg-blue-50 p-3 rounded border border-blue-200">
                     <label className="block text-sm font-bold mb-2 text-blue-800 flex items-center">
-                        <Users size={16} className="mr-2"/> Chọn các lớp học ghép (Môn chung)
+                        <Users size={16} className="mr-2"/> {editItem ? 'Điều chỉnh các lớp ghép' : 'Chọn các lớp học ghép (Môn chung)'}
                     </label>
                     <div className="grid grid-cols-2 gap-2 max-h-32 overflow-y-auto pr-2 custom-scrollbar">
                         {classes.filter(cls => {
                             if (!currentFormSubject) return false;
 
-                            const mainClass = classes.find(c => c.id === selectedClassId);
+                            const mainClass = classes.find(c => c.id === (editItem ? editItem.classId : selectedClassId));
                             if (!mainClass) return false;
 
-                            // NEW: Campus Logic - Filter out classes from different campuses
                             const mainCampus = mainClass.campus || 'Cơ sở 1';
                             const candidateCampus = cls.campus || 'Cơ sở 1';
-                            if (mainCampus !== candidateCampus) {
-                                return false;
-                            }
+                            if (mainCampus !== candidateCampus) return false;
 
-                            // NEW: Session Logic - Filter out classes from different sessions
                             const mainSession = mainClass.session || 'Ban ngày';
                             const candidateSession = cls.session || 'Ban ngày';
-                            if (mainSession !== candidateSession) {
-                                return false;
-                            }
+                            if (mainSession !== candidateSession) return false;
 
-                            // 1. Culture: Exclude H8
-                            if (currentFormSubject.majorId === 'culture') {
-                                return !cls.name.toUpperCase().includes('H8');
-                            }
+                            if (currentFormSubject.majorId === 'culture') return !cls.name.toUpperCase().includes('H8');
+                            if (currentFormSubject.majorId === 'culture_8') return cls.name.toUpperCase().includes('H8');
+                            if (currentFormSubject.majorId === 'common') return true;
 
-                             // 2. Culture 8: Only H8
-                            if (currentFormSubject.majorId === 'culture_8') {
-                                return cls.name.toUpperCase().includes('H8');
-                            }
-                            
-                            // 3. Common: Include All (that match campus/session)
-                            if (currentFormSubject.majorId === 'common') {
-                                return true;
-                            }
-
-                            // 4. Special Case: Electrical Majors (2 & 3) can study together if shared
-                            // 2: Điện công nghiệp, 3: Điện - điện tử
                             const electricalMajors = ['2', '3'];
-                            if (electricalMajors.includes(currentFormSubject.majorId)) {
-                                return electricalMajors.includes(cls.majorId);
-                            }
+                            if (electricalMajors.includes(currentFormSubject.majorId)) return electricalMajors.includes(cls.majorId);
 
-                            // 5. Specific Major: Only include classes with same major
                             return cls.majorId === currentFormSubject.majorId;
                         }).map(cls => (
-                            <label key={cls.id} className={`flex items-center space-x-2 text-sm p-2 rounded cursor-pointer ${selectedSharedClasses.includes(cls.id) ? 'bg-blue-100' : 'hover:bg-white'}`}>
+                            <label key={cls.id} className={`flex items-center space-x-2 text-sm p-2 rounded cursor-pointer ${(editItem ? editItem.classId === cls.id : selectedClassId === cls.id) ? 'bg-blue-200' : selectedSharedClasses.includes(cls.id) ? 'bg-blue-100' : 'hover:bg-white'}`}>
                                 <input
                                     type="checkbox"
                                     className="rounded text-blue-600 focus:ring-blue-500"
                                     checked={selectedSharedClasses.includes(cls.id)}
-                                    disabled={cls.id === selectedClassId} // Current class is mandatory
+                                    disabled={editItem ? editItem.classId === cls.id : cls.id === selectedClassId}
                                     onChange={(e) => {
-                                        if (e.target.checked) {
-                                            setSelectedSharedClasses([...selectedSharedClasses, cls.id]);
-                                        } else {
-                                            setSelectedSharedClasses(selectedSharedClasses.filter(id => id !== cls.id));
-                                        }
+                                        if (e.target.checked) setSelectedSharedClasses([...selectedSharedClasses, cls.id]);
+                                        else setSelectedSharedClasses(selectedSharedClasses.filter(id => id !== cls.id));
                                     }}
                                 />
-                                <span className={cls.id === selectedClassId ? 'font-bold' : ''}>{cls.name}</span>
+                                <span className={(editItem ? editItem.classId === cls.id : cls.id === selectedClassId) ? 'font-bold' : ''}>{cls.name}</span>
                             </label>
                         ))}
                     </div>
