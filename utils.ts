@@ -167,12 +167,11 @@ export const checkConflict = (
 
         // Shared Class Conflict Detection: If this is a shared class move, check if any of the classes in the shared group are already busy
         if (isNewItemShared && item.classId !== newItem.classId) {
-             // This logic is already partially covered by the standard classId check, 
-             // but we want to ensure that if we are moving a group of classes (A, B) to a slot,
-             // and class B is already busy with another subject X, we catch it.
-             // The checkConflict is usually called per classId in the loop, so it should naturally catch it.
-             // However, let's make the message more specific if it's a shared subject conflict.
-             return { hasConflict: true, message: `Lớp ${conflictClassName} đang bận học môn khác (${item.subjectId === newItem.subjectId ? 'Cùng môn' : 'Môn khác'}) tại phòng ${item.roomId}.` };
+             const conflictSubject = subjects.find(s => s.id === item.subjectId)?.name || item.subjectId;
+             return { 
+                 hasConflict: true, 
+                 message: `Trùng lịch lớp ghép: Lớp ${conflictClassName} đang bận học môn ${conflictSubject} tại phòng ${item.roomId}.` 
+             };
         }
       }
     }
